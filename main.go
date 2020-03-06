@@ -111,11 +111,6 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
-	for i := range lb.backends {
-		if proxy == lb.backends[i].proxy {
-			break
-		}
-	}
 	proxy.ServeHTTP(w, r)
 }
 
