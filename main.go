@@ -17,8 +17,10 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -114,10 +116,61 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r)
 }
 
+// mustGetSystemCertPool - return system CAs or empty pool in case of error (or windows)
+func mustGetSystemCertPool() *x509.CertPool {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		return x509.NewCertPool()
+	}
+	return pool
+}
+
+func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 5 * time.Second,
+		}).DialContext,
+		MaxIdleConnsPerHost:   256,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		// Set this value so that the underlying transport round-tripper
+		// doesn't try to auto decode the body of objects with
+		// content-encoding set to `gzip`.
+		//
+		// Refer:
+		//    https://golang.org/src/net/http/transport.go?h=roundTrip#L1843
+		DisableCompression: true,
+	}
+	if enableTLS {
+		// Keep TLS config.
+		tr.TLSClientConfig = &tls.Config{
+			RootCAs: mustGetSystemCertPool(),
+			// Can't use SSLv3 because of POODLE and BEAST
+			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
+			// Can't use TLSv1.1 because of RC4 cipher usage
+			MinVersion:         tls.VersionTLS12,
+			NextProtos:         []string{"http/1.1"},
+			InsecureSkipVerify: ctx.GlobalBool("insecure"),
+		}
+
+		// Because we create a custom TLSClientConfig, we have to opt-in to HTTP/2.
+		// See https://github.com/golang/go/issues/14275
+		//
+		// TODO: Enable http2.0 when upstream issues related to HTTP/2 are fixed.
+		//
+		// if e = http2.ConfigureTransport(tr); e != nil {
+		// 	return nil, probe.NewError(e)
+		// }
+	}
+	return tr
+}
+
 func sidekickMain(ctx *cli.Context) error {
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthCheckDuration := ctx.GlobalInt("health-duration")
-	insecure := ctx.GlobalBool("insecure")
 	addr := ctx.GlobalString("address")
 	logging := ctx.GlobalBool("logging")
 
@@ -151,13 +204,7 @@ func sidekickMain(ctx *cli.Context) error {
 			return nil
 		}
 		proxy := httputil.NewSingleHostReverseProxy(target)
-		if insecure {
-			proxy.Transport = http.DefaultTransport
-			proxy.Transport.(*http.Transport).TLSClientConfig = &tls.Config{
-				NextProtos:         []string{"http/1.1"},
-				InsecureSkipVerify: true,
-			}
-		}
+		proxy.Transport = clientTransport(ctx, target.Scheme == "https")
 		backend := &Backend{endpoint, proxy, false, healthCheckPath, healthCheckDuration, logging}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
@@ -173,7 +220,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "MinIO Sidekick"
 	app.Author = "MinIO, Inc."
-	app.Description = `Run sidekick as a sidecar on the same server as your application. Sidekick will load balance the application requests across the backends.`
+	app.Description = `Run sidekick as a sidecar on the same server as your application. Sidekick will load balance the application requests across the backends`
 	app.UsageText = "sidekick [options] ENDPOINT_1 ENDPOINT_2 ENDPOINT_3 ... ENDPOINT_N"
 	app.Version = "1.0.0"
 	app.Flags = []cli.Flag{
