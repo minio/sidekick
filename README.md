@@ -1,3 +1,5 @@
+![sidekick](sidekick_logo.png)
+
 # Sidekick
 Sidekick is a load-balancer run as a sidecar.
 
