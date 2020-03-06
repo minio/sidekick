@@ -1,4 +1,4 @@
-// Copyright (c) 2019 MinIO, Inc.
+// Copyright (c) 2020 MinIO, Inc.
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -172,31 +172,33 @@ func sidekickMain(ctx *cli.Context) error {
 func main() {
 	app := cli.NewApp()
 	app.Name = "MinIO Sidekick"
-	app.Author = "Minio.io"
+	app.Author = "MinIO, Inc."
 	app.Description = `Run sidekick as a sidecar on the same server as your application. Sidekick will load balance the application requests across the backends.`
 	app.UsageText = "sidekick [options] ENDPOINT_1 ENDPOINT_2 ENDPOINT_3 ... ENDPOINT_N"
+	app.Version = "1.0.0"
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "address, a",
-			Usage: "listening address for Sidekick",
+			Usage: "listening address for sidekick",
 			Value: ":8080",
 		},
 		cli.StringFlag{
 			Name:  "health-path, p",
-			Usage: "Health check path",
+			Usage: "health check path",
+			Value: "/minio/health/ready",
 		},
 		cli.IntFlag{
 			Name:  "health-duration, d",
-			Usage: "Health check duration (in seconds)",
+			Usage: "health check duration in seconds",
 			Value: 5,
 		},
 		cli.BoolFlag{
 			Name:  "insecure, i",
-			Usage: "Disable TLS certificate verification",
+			Usage: "disable TLS certificate verification",
 		},
 		cli.BoolFlag{
 			Name:  "logging, l",
-			Usage: "Enable logging",
+			Usage: "enable logging",
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
@@ -216,15 +218,14 @@ VERSION:
 
 EXAMPLES:
   1. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
-     $ sidekick --health-path /minio/health/ready http://minio1:9000 http://minio2:9000 http://minio3:9000 http://minio4:9000
+     $ sidekick http://minio1:9000 http://minio2:9000 http://minio3:9000 http://minio4:9000
 
   2. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), listen on port 8000
-     $ sidekick --address :8000 --health-path /minio/health/ready http://minio1:9000 http://minio2:9000 http://minio3:9000 http://minio4:9000
+     $ sidekick --address ":8000" http://minio1:9000 http://minio2:9000 http://minio3:9000 http://minio4:9000
 
   3. Load balance across 4 MinIO Servers using HTTPS and disable TLS certificate validation
-     $ sidekick --insecure --health-path /minio/health/ready https://minio1:9000 https://minio2:9000 https://minio3:9000 https://minio4:9000
+     $ sidekick --insecure https://minio1:9000 https://minio2:9000 https://minio3:9000 https://minio4:9000
 `
-
 	app.Before = sidekickMain
 	app.RunAndExitOnError()
 }
