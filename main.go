@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/minio/cli"
+	"github.com/minio/minio/pkg/console"
+	"github.com/minio/minio/pkg/ellipses"
 )
 
 // Backend entity to which requests gets load balanced.
@@ -178,11 +180,38 @@ func sidekickMain(ctx *cli.Context) error {
 		healthCheckPath = "/" + healthCheckPath
 	}
 
-	endpoints := ctx.Args()
-	if len(endpoints) == 0 {
+	if !ctx.Args().Present() {
 		cli.ShowAppHelpAndExit(ctx, 1)
 		return errors.New("endpoints not provided")
 	}
+
+	var endpoints []string
+	if ellipses.HasEllipses(ctx.Args()...) {
+		argPatterns := make([]ellipses.ArgPattern, len(ctx.Args()))
+		for i, arg := range ctx.Args() {
+			patterns, err := ellipses.FindEllipsesPatterns(arg)
+			if err != nil {
+				return err
+			}
+			argPatterns[i] = patterns
+		}
+		for _, argPattern := range argPatterns {
+			for _, lbls := range argPattern.Expand() {
+				endpoints = append(endpoints, strings.Join(lbls, ""))
+			}
+		}
+	} else {
+		endpoints = ctx.Args()
+		if len(endpoints) == 1 {
+			var err error
+			// Single endpoint do lookup address to get all IPs
+			endpoints, err = net.LookupHost(endpoints[0])
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	var backends []*Backend
 	for _, endpoint := range endpoints {
 		endpoint = strings.TrimSuffix(endpoint, "/")
@@ -210,19 +239,19 @@ func sidekickMain(ctx *cli.Context) error {
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
 	}
-	lb := &LoadBalancer{
+	console.Infoln("Listening on", addr)
+	return http.ListenAndServe(addr, &LoadBalancer{
 		backends: backends,
-	}
-	return http.ListenAndServe(addr, lb)
+	})
 }
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "MinIO Sidekick"
+	app.Name = "sidekick"
 	app.Author = "MinIO, Inc."
-	app.Description = `Run sidekick as a sidecar on the same server as your application. Sidekick will load balance the application requests across the backends`
-	app.UsageText = "sidekick [options] ENDPOINT_1 ENDPOINT_2 ENDPOINT_3 ... ENDPOINT_N"
-	app.Version = "1.0.0"
+	app.Description = `sidekick is a high-performance sidecar load-balancer`
+	app.UsageText = "sidekick [options] ENDPOINTs..."
+	app.Version = Version
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "address, a",
@@ -255,7 +284,8 @@ DESCRIPTION:
   {{.Description}}
 
 USAGE:
-  sidekick [FLAGS] ENDPOINT_1 ENDPOINT_2 ENDPOINT_3 ... ENDPOINT_N
+  sidekick [FLAGS] ENDPOINTs...
+  sidekick [FLAGS] ENDPOINT{1...N}
 
 FLAGS:
   {{range .VisibleFlags}}{{.}}
@@ -265,13 +295,13 @@ VERSION:
 
 EXAMPLES:
   1. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
-     $ sidekick http://minio1:9000 http://minio2:9000 http://minio3:9000 http://minio4:9000
+     $ sidekick http://minio{1...4}:9000
 
   2. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), listen on port 8000
-     $ sidekick --address ":8000" http://minio1:9000 http://minio2:9000 http://minio3:9000 http://minio4:9000
+     $ sidekick --address ":8000" http://minio{1...4}:9000
 
   3. Load balance across 4 MinIO Servers using HTTPS and disable TLS certificate validation
-     $ sidekick --insecure https://minio1:9000 https://minio2:9000 https://minio3:9000 https://minio4:9000
+     $ sidekick --insecure https://minio{1...4}:9000
 `
 	app.Before = sidekickMain
 	app.RunAndExitOnError()
