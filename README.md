@@ -1,22 +1,21 @@
 ![sidekick](sidekick_logo.png)
 
 # Sidekick
-Sidekick is a load-balancer run as a sidecar.
-
-Sidekick is meant to be run on the same server as your S3 client application. The S3 client application sends S3 requests to Sidekick which in-turn load balances the requests across different MinIO servers.
+Sidekick is a high-performance sidecar load-balancer. By attaching a tiny load balancer as a sidecar to each of the client application processes, you can eliminate the centralized loadbalancer bottleneck and DNS failover management.  Sidekick automatically avoids sending traffic to the failed servers by checking their health via the readiness API and HTTP error returns.
 
 ## Usage
 
 ```
 USAGE:
-  sidekick [FLAGS] ENDPOINT_1 ENDPOINT_2 ENDPOINT_3 ... ENDPOINT_N
+  sidekick [FLAGS] ENDPOINTs...
 
 FLAGS:
-  --address value, -a value          listening address for sidekick (default: ":8080")
-  --health-path value, -p value      health check path (default: "/minio/health/ready")
+  --adsdress value, -a value         listening address for sidekick (default: ":8080")
+  --health-path value, -p value      health check path (default: "/health/ready")
   --health-duration value, -d value  health check duration (default: 5s)
   --insecure, -i                     disable TLS certificate verification
-  --logging, -l                      enable debug logging
+  --log , -l                         enable logging
+  --trace, -t                        enable HTTP tracing
   --help, -h                         show help
   --version, -v                      print the version
 ```
@@ -25,15 +24,10 @@ FLAGS:
 
 1. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
 ```
-$ sidekick http://minio1:9000 http://minio2:9000 http://minio3:9000 http://minio4:9000
+$ sidekick --health-path=/minio/health/ready http://minio1:9000 http://minio2:9000 http://minio3:9000 http://minio4:9000
 ```
 
-2. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), listen on port 8000
+2. Load balance across 16 MinIO Servers (http://minio1:9000 to http://minio16:9000)
 ```
-$ sidekick --address :8000 http://minio1:9000 http://minio2:9000 http://minio3:9000 http://minio4:9000
-```
-
-3. Load balance across 4 MinIO Servers using HTTPS and disable TLS certificate validation
-```
-$ sidekick --insecure https://minio1:9000 https://minio2:9000 https://minio3:9000 https://minio4:9000
+$ sidekick --health-path=/minio/health/ready http://minio{1...16}:9000
 ```
