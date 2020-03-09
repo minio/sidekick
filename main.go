@@ -17,9 +17,11 @@ package main
 
 import (
 	"context"
+	crand "crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"math/big"
 	"math/rand"
 	"net"
 	"net/http"
@@ -92,8 +94,9 @@ func (b *Backend) healthCheck() {
 }
 
 type loadBalancer struct {
-	backends []*Backend
-	next     int // next backend the request should go to.
+	backends  []*Backend
+	next      int // next backend the request should go to.
+	listIndex int // List happens on the same backend always as S3 list is stateful for MinIO.
 	sync.RWMutex
 }
 
@@ -123,9 +126,54 @@ func (lb *loadBalancer) nextProxy() *httputil.ReverseProxy {
 	return nil
 }
 
+// Returns the next backend the request should go to.
+func (lb *loadBalancer) listProxy() *httputil.ReverseProxy {
+	lb.Lock()
+	defer lb.Unlock()
+
+	tries := 0
+	listIndex := lb.listIndex
+	for {
+		var proxy *httputil.ReverseProxy
+		if lb.backends[listIndex].up {
+			proxy = lb.backends[listIndex].proxy
+		}
+		listIndex++
+		if listIndex == len(lb.backends) {
+			listIndex = 0
+		}
+		if proxy != nil {
+			return proxy
+		}
+		tries++
+		if tries == len(lb.backends) {
+			break
+		}
+	}
+	return nil
+}
+
+func trimPrefixSuffixSlash(p string) string {
+	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimSuffix(p, "/")
+	return p
+}
+
 // ServeHTTP - LoadBalancer implements http.Handler
 func (lb *loadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	proxy := lb.nextProxy()
+	p := r.URL.Path
+	p = trimPrefixSuffixSlash(p)
+
+	var proxy *httputil.ReverseProxy
+
+	if strings.Contains(p, "/") {
+		// Object calls get distributed across the backends.
+		proxy = lb.nextProxy()
+	} else {
+		// Bucket calls always go to the same backend (to accommodate ListObjects which is stateful).
+		proxy = lb.listProxy()
+	}
+
 	if proxy == nil {
 		w.WriteHeader(http.StatusBadGateway)
 		return
@@ -271,9 +319,18 @@ func sidekickMain(ctx *cli.Context) {
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
 	}
+
+	nBig, err := crand.Int(crand.Reader, big.NewInt(int64(len(backends))))
+	if err != nil {
+		panic(err)
+	}
+	randInt := int(nBig.Int64())
+
 	console.Infoln("Listening on", addr)
 	if err := http.ListenAndServe(addr, &loadBalancer{
-		backends: backends,
+		backends:  backends,
+		next:      randInt,
+		listIndex: randInt,
 	}); err != nil {
 		console.Fatalln(err)
 	}
