@@ -18,12 +18,12 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -170,7 +170,7 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	return tr
 }
 
-func sidekickMain(ctx *cli.Context) error {
+func sidekickMain(ctx *cli.Context) {
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthCheckDuration := ctx.GlobalInt("health-duration")
 	addr := ctx.GlobalString("address")
@@ -181,8 +181,7 @@ func sidekickMain(ctx *cli.Context) error {
 	}
 
 	if !ctx.Args().Present() {
-		cli.ShowAppHelpAndExit(ctx, 1)
-		return errors.New("endpoints not provided")
+		console.Fatalln(fmt.Errorf("not arguments found, please use '%s --help'", ctx.App.Name))
 	}
 
 	var endpoints []string
@@ -191,7 +190,7 @@ func sidekickMain(ctx *cli.Context) error {
 		for i, arg := range ctx.Args() {
 			patterns, err := ellipses.FindEllipsesPatterns(arg)
 			if err != nil {
-				return err
+				console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", arg, err))
 			}
 			argPatterns[i] = patterns
 		}
@@ -203,11 +202,18 @@ func sidekickMain(ctx *cli.Context) error {
 	} else {
 		endpoints = ctx.Args()
 		if len(endpoints) == 1 {
-			var err error
-			// Single endpoint do lookup address to get all IPs
-			endpoints, err = net.LookupHost(endpoints[0])
+			target, err := url.Parse(endpoints[0])
 			if err != nil {
-				return err
+				console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", endpoints[0], err))
+			}
+			// Single endpoint do lookup address to get all IPs
+			addrs, err := net.LookupHost(target.Hostname())
+			if err != nil {
+				console.Fatalln(fmt.Errorf("Unable to lookup host %s: %s", endpoints[0], err))
+			}
+			endpoints = make([]string, len(addrs))
+			for i, addr := range addrs {
+				endpoints[i] = target.Scheme + "://" + net.JoinHostPort(addr, target.Port())
 			}
 		}
 	}
@@ -217,20 +223,18 @@ func sidekickMain(ctx *cli.Context) error {
 		endpoint = strings.TrimSuffix(endpoint, "/")
 		target, err := url.Parse(endpoint)
 		if err != nil {
-			return err
+			console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", endpoint, err))
 		}
 		if target.Scheme == "" {
 			target.Scheme = "http"
 		}
 		if target.Scheme != "http" && target.Scheme != "https" {
-			fmt.Printf("\nScheme for %s should be http or https\n\n", endpoint)
-			cli.ShowAppHelpAndExit(ctx, 1)
-			return nil
+			console.Fatalln("Unexpected scheme %s, should be http or https, please use '%s --help'",
+				endpoint, ctx.App.Name)
 		}
 		if target.Host == "" {
-			fmt.Printf("\nParse error for %s\n\n", endpoint)
-			cli.ShowAppHelpAndExit(ctx, 1)
-			return nil
+			console.Fatalln(fmt.Errorf("Missing host address %s, please use '%s --help'",
+				endpoint, ctx.App.Name))
 		}
 		proxy := httputil.NewSingleHostReverseProxy(target)
 		proxy.Transport = clientTransport(ctx, target.Scheme == "https")
@@ -240,9 +244,11 @@ func sidekickMain(ctx *cli.Context) error {
 		backends = append(backends, backend)
 	}
 	console.Infoln("Listening on", addr)
-	return http.ListenAndServe(addr, &LoadBalancer{
+	if err := http.ListenAndServe(addr, &LoadBalancer{
 		backends: backends,
-	})
+	}); err != nil {
+		console.Fatalln(err)
+	}
 }
 
 func main() {
@@ -277,10 +283,7 @@ func main() {
 			Usage: "enable logging",
 		},
 	}
-	app.CustomAppHelpTemplate = `NAME:
-  {{.Name}}
-
-DESCRIPTION:
+	app.CustomAppHelpTemplate = `DESCRIPTION:
   {{.Description}}
 
 USAGE:
@@ -303,6 +306,6 @@ EXAMPLES:
   3. Load balance across 4 MinIO Servers using HTTPS and disable TLS certificate validation
      $ sidekick --insecure https://minio{1...4}:9000
 `
-	app.Before = sidekickMain
-	app.RunAndExitOnError()
+	app.Action = sidekickMain
+	app.Run(os.Args)
 }
