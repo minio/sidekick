@@ -25,7 +25,6 @@ FLAGS:
   --health-duration value, -d value  health check duration (default: 5s)
   --insecure, -i                     disable TLS certificate verification
   --log , -l                         enable logging
-  --trace, -t                        enable HTTP tracing
   --help, -h                         show help
   --version, -v                      print the version
 ```
