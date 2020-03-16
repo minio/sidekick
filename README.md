@@ -52,9 +52,9 @@ https://github.com/GoogleCloudPlatform/spark-on-k8s-operator/blob/master/docs/us
 spec:
   executor:
     sidecars:
-    - name: sidekick
+    - name: minio-lb
       image: "minio/sidekick:latest"
-      args: ["--address", ":8080", "http://minio-lb:30002"]
+      args: ["--address", ":8080", "--health-path", "/minio/health/ready", "http://minio{1...16}:9000"]
       ...
 ```
 
