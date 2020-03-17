@@ -28,7 +28,11 @@ FLAGS:
   --health-path value, -p value      health check path
   --health-duration value, -d value  health check duration in seconds (default: 5)
   --insecure, -i                     disable TLS certificate verification
-  --logging, -l                      enable logging
+  --log , -l                         enable logging
+  --trace, -t                        enable HTTP tracing
+  --quiet                            disable console messages
+  --json                             output sidekick logs and trace in json format
+  --debug                            output verbose trace
   --help, -h                         show help
   --version, -v                      print the version
 ```
