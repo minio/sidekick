@@ -60,7 +60,7 @@ func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error
 
 // healthCheck - background routine which checks if a backend is up or down.
 func (b *Backend) healthCheck() {
-	healthCheckURL := b.endpoint + b.healthCheckPath
+	healthCheckURL := strings.TrimSuffix(b.endpoint, "/") + b.healthCheckPath
 	for {
 		req, err := http.NewRequest(http.MethodGet, healthCheckURL, nil)
 		if err != nil {
@@ -259,7 +259,15 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	return tr
 }
 
+func checkMain(ctx *cli.Context) {
+	if !ctx.Args().Present() {
+		console.Fatalln(fmt.Errorf("not arguments found, please check documentation '%s --help'", ctx.App.Name))
+	}
+}
+
 func sidekickMain(ctx *cli.Context) {
+	checkMain(ctx)
+
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthCheckDuration := ctx.GlobalInt("health-duration")
 	addr := ctx.GlobalString("address")
@@ -267,10 +275,6 @@ func sidekickMain(ctx *cli.Context) {
 
 	if !strings.HasPrefix(healthCheckPath, "/") {
 		healthCheckPath = "/" + healthCheckPath
-	}
-
-	if !ctx.Args().Present() {
-		console.Fatalln(fmt.Errorf("not arguments found, please use '%s --help'", ctx.App.Name))
 	}
 
 	var endpoints []string
@@ -352,7 +356,6 @@ func main() {
 		cli.StringFlag{
 			Name:  "health-path, p",
 			Usage: "health check path",
-			Value: "/minio/health/ready",
 		},
 		cli.IntFlag{
 			Name:  "health-duration, d",
@@ -383,13 +386,13 @@ VERSION:
 
 EXAMPLES:
   1. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
-     $ sidekick http://minio{1...4}:9000
+     $ sidekick --health-path "/minio/health/ready" --http://minio{1...4}:9000
 
   2. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), listen on port 8000
-     $ sidekick --address ":8000" http://minio{1...4}:9000
+     $ sidekick --health-path "/minio/health/ready" --address ":8000" http://minio{1...4}:9000
 
   3. Load balance across 4 MinIO Servers using HTTPS and disable TLS certificate validation
-     $ sidekick --insecure https://minio{1...4}:9000
+     $ sidekick --health-path "/minio/health/ready" --insecure https://minio{1...4}:9000
 `
 	app.Action = sidekickMain
 	app.Run(os.Args)
