@@ -21,6 +21,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
 	"math/big"
 	"math/rand"
 	"net"
@@ -37,6 +40,8 @@ import (
 	"github.com/minio/minio/pkg/ellipses"
 )
 
+const slashSeparator = "/"
+
 // Backend entity to which requests gets load balanced.
 type Backend struct {
 	endpoint            string
@@ -52,7 +57,7 @@ type Backend struct {
 func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	if err != nil {
 		if b.logging {
-			fmt.Println(b.endpoint, err)
+			log.Printf("reverseProxy %s, error: %s\n", b.endpoint, err)
 		}
 		b.up = false
 	}
@@ -60,12 +65,12 @@ func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error
 
 // healthCheck - background routine which checks if a backend is up or down.
 func (b *Backend) healthCheck() {
-	healthCheckURL := strings.TrimSuffix(b.endpoint, "/") + b.healthCheckPath
+	healthCheckURL := strings.TrimSuffix(b.endpoint, slashSeparator) + b.healthCheckPath
 	for {
 		req, err := http.NewRequest(http.MethodGet, healthCheckURL, nil)
 		if err != nil {
 			if b.logging {
-				fmt.Printf("%s %s fails\n", b.endpoint, err)
+				log.Printf("%s is down, error: %s\n", b.endpoint, err)
 			}
 			b.up = false
 			time.Sleep(time.Duration(b.healthCheckDuration) * time.Second)
@@ -73,21 +78,26 @@ func (b *Backend) healthCheck() {
 		}
 
 		resp, err := b.httpClient.Do(req)
-		switch {
-		case err == nil && b.healthCheckPath == "":
-			resp.Body.Close()
-			fallthrough
-		case err == nil && resp.StatusCode == http.StatusOK:
-			resp.Body.Close()
-			if b.logging {
-				fmt.Printf("%s is up\n", b.endpoint)
-			}
-			b.up = true
-		default:
-			if b.logging {
-				fmt.Printf("%s is down : %s\n", b.endpoint, err)
-			}
+		if err != nil {
+			b.httpClient.CloseIdleConnections()
 			b.up = false
+			if b.logging {
+				// network error print it here
+				log.Printf("%s is down : err: %s\n", b.endpoint, err)
+			}
+		} else {
+			// Drain the connection.
+			io.Copy(ioutil.Discard, resp.Body)
+			resp.Body.Close()
+
+			b.up = resp.StatusCode == http.StatusOK
+			if b.logging {
+				if !b.up {
+					log.Printf("%s is down, http status: %s\n", b.endpoint, resp.Status)
+				} else {
+					log.Printf("%s is up, http status: %s\n", b.endpoint, resp.Status)
+				}
+			}
 		}
 		time.Sleep(time.Duration(b.healthCheckDuration) * time.Second)
 	}
@@ -154,8 +164,8 @@ func (lb *loadBalancer) listProxy() *httputil.ReverseProxy {
 }
 
 func trimPrefixSuffixSlash(p string) string {
-	p = strings.TrimPrefix(p, "/")
-	p = strings.TrimSuffix(p, "/")
+	p = strings.TrimPrefix(p, slashSeparator)
+	p = strings.TrimSuffix(p, slashSeparator)
 	return p
 }
 
@@ -166,7 +176,7 @@ func (lb *loadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var proxy *httputil.ReverseProxy
 
-	if strings.Contains(p, "/") {
+	if strings.Contains(p, slashSeparator) {
 		// Object calls get distributed across the backends.
 		proxy = lb.nextProxy()
 	} else {
@@ -273,8 +283,8 @@ func sidekickMain(ctx *cli.Context) {
 	addr := ctx.GlobalString("address")
 	logging := ctx.GlobalBool("logging")
 
-	if !strings.HasPrefix(healthCheckPath, "/") {
-		healthCheckPath = "/" + healthCheckPath
+	if !strings.HasPrefix(healthCheckPath, slashSeparator) {
+		healthCheckPath = slashSeparator + healthCheckPath
 	}
 
 	var endpoints []string
@@ -298,7 +308,7 @@ func sidekickMain(ctx *cli.Context) {
 
 	var backends []*Backend
 	for _, endpoint := range endpoints {
-		endpoint = strings.TrimSuffix(endpoint, "/")
+		endpoint = strings.TrimSuffix(endpoint, slashSeparator)
 		target, err := url.Parse(endpoint)
 		if err != nil {
 			console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", endpoint, err))
