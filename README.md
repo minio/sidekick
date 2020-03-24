@@ -26,9 +26,9 @@ USAGE:
 FLAGS:
   --address value, -a value          listening address for sidekick (default: ":8080")
   --health-path value, -p value      health check path
-  --health-duration value, -d value  health check duration (default: 5s)
+  --health-duration value, -d value  health check duration in seconds (default: 5)
   --insecure, -i                     disable TLS certificate verification
-  --log , -l                         enable logging
+  --logging, -l                      enable logging
   --help, -h                         show help
   --version, -v                      print the version
 ```
