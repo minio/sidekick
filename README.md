@@ -164,5 +164,21 @@ kubectl create -f spark-job.yaml
 kubectl logs -f --namespace spark-operator spark-minio-app-driver spark-kubernetes-driver
 ```
 
-## Roadmap
-- *S3 Cache*: Use an S3 compatible object storage for shared cache storage
+### S3 Cache
+S3 compatible object store can be configured for shared cache storage
+
+Caching can be enabled by setting the cache environment variables for sidekick which specify
+the endpoint of S3 compatible object store, access key, secret key to authenticate to the store.
+Objects are cached on GET to the shared store if object from the backend exceeds a configurable
+minimum size.
+```bash
+export SIDEKICK_CACHE_ENDPOINT="https://minio:9080"
+export SIDEKICK_CACHE_ACCESS_KEY="minio"
+export SIDEKICK_CACHE_SECRET_KEY="minio123"
+export SIDEKICK_CACHE_BUCKET="cache01"
+export SIDEKICK_CACHE_MIN_SIZE=64MB
+export SIDEKICK_CACHE_HEALTH_DURATION=20
+$ sidekick --health-path=/ready http://myapp.myorg.dom
+```
+
+
