@@ -20,10 +20,11 @@ import (
 	crand "crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
+	"math"
 	"math/big"
 	"math/rand"
 	"net"
@@ -35,6 +36,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
+	ui "github.com/gizak/termui/v3"
+	"github.com/gizak/termui/v3/widgets"
+	"github.com/gorilla/mux"
 	"github.com/minio/cli"
 	"github.com/minio/minio/pkg/console"
 	"github.com/minio/minio/pkg/ellipses"
@@ -42,35 +47,156 @@ import (
 
 const slashSeparator = "/"
 
+var (
+	globalQuietEnabled   bool
+	globalDebugEnabled   bool
+	globalLoggingEnabled bool
+	globalTraceEnabled   bool
+	globalJSONEnabled    bool
+	globalConsoleDisplay bool
+	globalTermTable      *widgets.Table
+	globalConnStats      []*ConnStats
+	timeZero             = time.Time{}
+)
+
+const (
+	prometheusMetricsPath = "/.prometheus/metrics"
+)
+
+func log(msg logMessage) error {
+	if globalQuietEnabled {
+		return nil
+	}
+	msg.Type = LogMsgType
+	msg.Timestamp = time.Now().UTC()
+	msg.DowntimeDuration = msg.downtimeEnd.Sub(msg.downtimeStart)
+	if !globalLoggingEnabled {
+		return nil
+	}
+	if globalJSONEnabled {
+		jsonBytes, err := json.Marshal(msg)
+		if err != nil {
+			return err
+		}
+		console.Println(string(jsonBytes))
+		return nil
+	}
+	console.Println(msg.String())
+	return nil
+}
+
+const (
+	// LogMsgType for log messages
+	LogMsgType = "LOG"
+	// TraceMsgType for trace messages
+	TraceMsgType = "TRACE"
+	// DebugMsgType for debug output
+	DebugMsgType = "DEBUG"
+)
+
+type logMessage struct {
+	Type string `json:"Type"`
+	// Endpoint of backend
+	Endpoint string `json:"Endpoint"`
+	// Error message
+	Error error `json:"Error,omitempty"`
+	// Status of endpoint
+	Status string `json:"Status,omitempty"`
+	// Downtime so far
+	downtimeStart    time.Time
+	downtimeEnd      time.Time
+	DowntimeDuration time.Duration `json:"Downtime,omitempty"`
+	Timestamp        time.Time
+}
+
+func (l logMessage) String() string {
+	if l.Error == nil {
+		if !l.downtimeStart.Equal(timeZero) {
+			return fmt.Sprintf("%s%2s: %s  %s is %s Downtime: %s", console.Colorize("LogMsgType", l.Type), "", l.Timestamp.Format(timeFormat),
+				l.Endpoint, l.Status, l.downtimeEnd.Sub(l.downtimeStart))
+		}
+		return fmt.Sprintf("%s%2s: %s  %s is %s", console.Colorize("LogMsgType", l.Type), "", l.Timestamp.Format(timeFormat),
+			l.Endpoint, l.Status)
+	}
+	return fmt.Sprintf("%s%2s: %s  %s is %s: %s", console.Colorize("LogMsgType", l.Type), "", l.Timestamp.Format(timeFormat), l.Endpoint, l.Status, l.Error)
+}
+
 // Backend entity to which requests gets load balanced.
 type Backend struct {
 	endpoint            string
 	proxy               *httputil.ReverseProxy
 	httpClient          *http.Client
-	up                  bool
+	up                  BackendStatus
 	healthCheckPath     string
 	healthCheckDuration int
-	logging             bool
+	Stats               *BackendStats
+	DowntimeStart       time.Time
+}
+
+// BackendStatus - if true, backend is up.
+type BackendStatus bool
+
+func (b BackendStatus) String() string {
+	if BackendUP {
+		return "up"
+	}
+	return "down"
+}
+
+const (
+	// BackendUP - backend is online
+	BackendUP BackendStatus = true
+	// BackendDown - backend is offline
+	BackendDown BackendStatus = false
+)
+
+func (b *Backend) getServerStatus() string {
+	status := "UP"
+	if !b.up {
+		status = "DOWN"
+	}
+	return status
+}
+
+// BackendStats holds server stats for backend
+type BackendStats struct {
+	sync.Mutex
+	LastDowntime    time.Duration
+	CumDowntime     time.Duration
+	TotCalls        int64
+	TotCallFailures int64
+	MinLatency      time.Duration
+	MaxLatency      time.Duration
+	CumLatency      time.Duration
+	Rx              int64
+	Tx              int64
+	UpSince         time.Time
 }
 
 // ErrorHandler called by httputil.ReverseProxy for errors.
 func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	if err != nil {
-		if b.logging {
-			log.Printf("reverseProxy %s, error: %s\n", b.endpoint, err)
+		if globalLoggingEnabled {
+			log(logMessage{Endpoint: b.endpoint, Error: err})
 		}
 		b.up = false
 	}
+}
+
+// registerMetricsRouter - add handler functions for metrics.
+func registerMetricsRouter(router *mux.Router) {
+	router.Handle(prometheusMetricsPath, metricsHandler())
 }
 
 // healthCheck - background routine which checks if a backend is up or down.
 func (b *Backend) healthCheck() {
 	healthCheckURL := strings.TrimSuffix(b.endpoint, slashSeparator) + b.healthCheckPath
 	for {
+		reqTime := time.Now().UTC()
 		req, err := http.NewRequest(http.MethodGet, healthCheckURL, nil)
 		if err != nil {
-			if b.logging {
-				log.Printf("%s is down, error: %s\n", b.endpoint, err)
+			if globalLoggingEnabled {
+				log(logMessage{Endpoint: b.endpoint, Error: err})
 			}
 			b.up = false
 			time.Sleep(time.Duration(b.healthCheckDuration) * time.Second)
@@ -78,28 +204,81 @@ func (b *Backend) healthCheck() {
 		}
 
 		resp, err := b.httpClient.Do(req)
+		respTime := time.Now().UTC()
 		if err != nil {
 			b.httpClient.CloseIdleConnections()
-			b.up = false
-			if b.logging {
-				// network error print it here
-				log.Printf("%s is down : err: %s\n", b.endpoint, err)
+			if globalLoggingEnabled && ((b.up == BackendDown) || (b.Stats.UpSince.Equal(timeZero))) {
+				log(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
+			}
+			if b.up {
+				b.up = false
+			}
+			if b.DowntimeStart.Equal(timeZero) {
+				b.DowntimeStart = time.Now().UTC()
 			}
 		} else {
 			// Drain the connection.
 			io.Copy(ioutil.Discard, resp.Body)
 			resp.Body.Close()
-
-			b.up = resp.StatusCode == http.StatusOK
-			if b.logging {
-				if !b.up {
-					log.Printf("%s is down, http status: %s\n", b.endpoint, resp.Status)
-				} else {
-					log.Printf("%s is up, http status: %s\n", b.endpoint, resp.Status)
+			var downtimeEnd time.Time
+			if resp.StatusCode == http.StatusOK {
+				if !b.DowntimeStart.Equal(timeZero) {
+					now := time.Now().UTC()
+					downtime := now.Sub(b.DowntimeStart)
+					b.updateDowntime(downtime)
+					downtimeEnd = now
 				}
+				if globalLoggingEnabled && (b.up == BackendDown) && (!b.Stats.UpSince.Equal(timeZero)) {
+					log(logMessage{Endpoint: b.endpoint, Status: "up", downtimeStart: b.DowntimeStart, downtimeEnd: downtimeEnd})
+				}
+				b.Stats.UpSince = time.Now()
+				b.DowntimeStart = timeZero
+			}
+			b.up = resp.StatusCode == http.StatusOK
+		}
+		if globalTraceEnabled {
+			if resp != nil {
+				httpInternalTrace(req, resp, reqTime, respTime, b)
 			}
 		}
 		time.Sleep(time.Duration(b.healthCheckDuration) * time.Second)
+	}
+}
+
+func (b *Backend) updateDowntime(downtime time.Duration) {
+	b.Stats.Lock()
+	defer b.Stats.Unlock()
+	b.Stats.LastDowntime = downtime
+	b.Stats.CumDowntime = b.Stats.CumDowntime + downtime
+}
+
+// updateCallStats updates the cumulative stats for each call to backend
+func (b *Backend) updateCallStats(t shortTraceMsg) {
+	b.Stats.Lock()
+	defer b.Stats.Unlock()
+	b.Stats.TotCalls++
+	if t.StatusCode >= http.StatusBadRequest {
+		b.Stats.TotCallFailures++
+	}
+	b.Stats.MaxLatency = time.Duration(int64(math.Max(float64(b.Stats.MaxLatency), float64(t.CallStats.Latency))))
+	b.Stats.MinLatency = time.Duration(int64(math.Min(float64(b.Stats.MinLatency), float64(t.CallStats.Latency))))
+	b.Stats.Rx += int64(t.CallStats.Rx)
+	b.Stats.Tx += int64(t.CallStats.Tx)
+	for _, c := range globalConnStats {
+		if c == nil {
+			continue
+		}
+		if c.endpoint != b.endpoint {
+			continue
+		}
+		c.setMinLatency(b.Stats.MinLatency)
+		c.setMaxLatency(b.Stats.MaxLatency)
+		c.incInputBytes(b.Stats.Rx)
+		c.incOutputBytes(b.Stats.Tx)
+		c.incTotalCalls()
+		if t.StatusCode >= http.StatusBadRequest {
+			c.incTotalCallFailures()
+		}
 	}
 }
 
@@ -111,56 +290,60 @@ type loadBalancer struct {
 }
 
 // Returns the next backend the request should go to.
-func (lb *loadBalancer) nextProxy() *httputil.ReverseProxy {
+func (lb *loadBalancer) nextProxy() (*httputil.ReverseProxy, int) {
 	lb.Lock()
 	defer lb.Unlock()
 
 	tries := 0
+	idx := 0
 	for {
 		var proxy *httputil.ReverseProxy
 		if lb.backends[lb.next].up {
 			proxy = lb.backends[lb.next].proxy
+			idx = lb.next
 		}
 		lb.next++
 		if lb.next == len(lb.backends) {
 			lb.next = 0
 		}
 		if proxy != nil {
-			return proxy
+			return proxy, idx
 		}
 		tries++
 		if tries == len(lb.backends) {
 			break
 		}
 	}
-	return nil
+	return nil, -1
 }
 
 // Returns the next backend the request should go to.
-func (lb *loadBalancer) listProxy() *httputil.ReverseProxy {
+func (lb *loadBalancer) listProxy() (*httputil.ReverseProxy, int) {
 	lb.Lock()
 	defer lb.Unlock()
 
 	tries := 0
 	listIndex := lb.listIndex
+	idx := lb.listIndex
 	for {
 		var proxy *httputil.ReverseProxy
 		if lb.backends[listIndex].up {
 			proxy = lb.backends[listIndex].proxy
+			idx = listIndex
 		}
 		listIndex++
 		if listIndex == len(lb.backends) {
 			listIndex = 0
 		}
 		if proxy != nil {
-			return proxy
+			return proxy, idx
 		}
 		tries++
 		if tries == len(lb.backends) {
 			break
 		}
 	}
-	return nil
+	return nil, -1
 }
 
 func trimPrefixSuffixSlash(p string) string {
@@ -175,20 +358,22 @@ func (lb *loadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p = trimPrefixSuffixSlash(p)
 
 	var proxy *httputil.ReverseProxy
-
-	if strings.Contains(p, slashSeparator) {
+	var bkIdx int
+	if strings.Contains(p, "/") {
 		// Object calls get distributed across the backends.
-		proxy = lb.nextProxy()
+		proxy, bkIdx = lb.nextProxy()
 	} else {
 		// Bucket calls always go to the same backend (to accommodate ListObjects which is stateful).
-		proxy = lb.listProxy()
+		proxy, bkIdx = lb.listProxy()
 	}
-
 	if proxy == nil {
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
-	proxy.ServeHTTP(w, r)
+	handlerFn := func(w http.ResponseWriter, r *http.Request) {
+		proxy.ServeHTTP(w, r)
+	}
+	httpTraceHdrs(handlerFn, w, r, lb.backends[bkIdx])
 }
 
 // mustGetSystemCertPool - return system CAs or empty pool in case of error (or windows)
@@ -281,7 +466,26 @@ func sidekickMain(ctx *cli.Context) {
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthCheckDuration := ctx.GlobalInt("health-duration")
 	addr := ctx.GlobalString("address")
-	logging := ctx.GlobalBool("logging")
+	globalLoggingEnabled = ctx.GlobalBool("log")
+	globalTraceEnabled = ctx.GlobalBool("trace")
+	globalJSONEnabled = ctx.GlobalBool("json")
+	globalQuietEnabled = ctx.GlobalBool("quiet")
+	globalConsoleDisplay = globalLoggingEnabled || globalTraceEnabled
+	globalDebugEnabled = ctx.GlobalBool("debug")
+
+	if globalConsoleDisplay {
+		console.SetColor("LogMsgType", color.New(color.FgHiMagenta))
+		console.SetColor("TraceMsgType", color.New(color.FgYellow))
+		console.SetColor("Stat", color.New(color.FgYellow))
+		console.SetColor("Request", color.New(color.FgCyan))
+		console.SetColor("Method", color.New(color.Bold, color.FgWhite))
+		console.SetColor("Host", color.New(color.Bold, color.FgGreen))
+		console.SetColor("ReqHeaderKey", color.New(color.Bold, color.FgWhite))
+		console.SetColor("RespHeaderKey", color.New(color.Bold, color.FgCyan))
+		console.SetColor("RespStatus", color.New(color.Bold, color.FgYellow))
+		console.SetColor("ErrStatus", color.New(color.Bold, color.FgRed))
+		console.SetColor("Response", color.New(color.FgGreen))
+	}
 
 	if !strings.HasPrefix(healthCheckPath, slashSeparator) {
 		healthCheckPath = slashSeparator + healthCheckPath
@@ -326,12 +530,14 @@ func sidekickMain(ctx *cli.Context) {
 		}
 		proxy := httputil.NewSingleHostReverseProxy(target)
 		proxy.Transport = clientTransport(ctx, target.Scheme == "https")
+		stats := BackendStats{MinLatency: time.Duration(24 * time.Hour), MaxLatency: time.Duration(0)}
 		backend := &Backend{endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, false, healthCheckPath, healthCheckDuration, logging}
+		}, false, healthCheckPath, healthCheckDuration, &stats, timeZero}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
+		globalConnStats = append(globalConnStats, newConnStats(endpoint))
 	}
 
 	nBig, err := crand.Int(crand.Reader, big.NewInt(int64(len(backends))))
@@ -339,13 +545,42 @@ func sidekickMain(ctx *cli.Context) {
 		panic(err)
 	}
 	randInt := int(nBig.Int64())
+	if !globalConsoleDisplay {
+		if err := ui.Init(); err != nil {
+			console.Fatalln("failed to initialize termui: %v", err)
+		}
+		defer ui.Close()
+		globalTermTable = initTermTable(backends)
 
-	console.Infoln("Listening on", addr)
-	if err := http.ListenAndServe(addr, &loadBalancer{
+		go func(backends []*Backend) {
+			tickerCount := 1
+			uiEvents := ui.PollEvents()
+			ticker := time.NewTicker(time.Second).C
+			for {
+				select {
+				case e := <-uiEvents:
+					switch e.ID {
+					case "q", "<C-c>":
+						os.Exit(0)
+					}
+				case <-ticker:
+					termTrace(backends, globalTermTable)
+					ui.Render(globalTermTable)
+					tickerCount++
+				}
+			}
+		}(backends)
+	} else {
+		console.Infoln("Listening on", addr)
+	}
+	router := mux.NewRouter().SkipClean(true).UseEncodedPath()
+	registerMetricsRouter(router)
+	router.PathPrefix("/").Handler(&loadBalancer{
 		backends:  backends,
 		next:      randInt,
 		listIndex: randInt,
-	}); err != nil {
+	})
+	if err := http.ListenAndServe(addr, router); err != nil {
 		console.Fatalln(err)
 	}
 }
@@ -377,8 +612,25 @@ func main() {
 			Usage: "disable TLS certificate verification",
 		},
 		cli.BoolFlag{
-			Name:  "logging, l",
+			Name:  "log, l",
 			Usage: "enable logging",
+		},
+
+		cli.BoolFlag{
+			Name:  "trace, t",
+			Usage: "enable request tracing",
+		},
+		cli.BoolFlag{
+			Name:  "quiet, q",
+			Usage: "disable console messages",
+		},
+		cli.BoolFlag{
+			Name:  "json",
+			Usage: "output sidekick logs and trace in json format",
+		},
+		cli.BoolFlag{
+			Name:  "debug",
+			Usage: "output verbose trace",
 		},
 	}
 	app.CustomAppHelpTemplate = `DESCRIPTION:
