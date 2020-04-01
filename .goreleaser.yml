@@ -20,7 +20,7 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -tags=kqueue
-      - -v
+      - -trimpath
     ldflags:
       - -s -w -X github.com/minio/sidekick.ReleaseTag={{.Tag}} -X github.com/minio/sidekick.CommitID={{.FullCommit}} -X github.com/minio/sidekick.Version={{.Version}} -X github.com/minio/sidekick.ShortCommitID={{.ShortCommit}} -X github.com/minio/sidekick.ReleaseTime={{.Date}}
 archives:
