@@ -648,7 +648,7 @@ VERSION:
 
 EXAMPLES:
   1. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
-     $ sidekick --health-path "/minio/health/ready" --http://minio{1...4}:9000
+     $ sidekick --health-path "/minio/health/ready" http://minio{1...4}:9000
 
   2. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), listen on port 8000
      $ sidekick --health-path "/minio/health/ready" --address ":8000" http://minio{1...4}:9000
