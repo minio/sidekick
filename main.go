@@ -420,8 +420,8 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 		DialContext:           newCustomDialContext(5*time.Second, 5*time.Second),
 		MaxIdleConnsPerHost:   256,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ExpectContinueTimeout: 30 * time.Second,
 		// Set this value so that the underlying transport round-tripper
 		// doesn't try to auto decode the body of objects with
 		// content-encoding set to `gzip`.
