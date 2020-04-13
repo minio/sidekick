@@ -16,11 +16,9 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"time"
 
-	"github.com/minio/minio/cmd/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/atomic"
@@ -99,11 +97,13 @@ func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
 
 }
 
-func metricsHandler() http.Handler {
+func metricsHandler() (http.Handler, error) {
 	registry := prometheus.NewRegistry()
 
 	err := registry.Register(newSidekickCollector())
-	logger.LogIf(context.Background(), err)
+	if err != nil {
+		return nil, err
+	}
 
 	gatherers := prometheus.Gatherers{
 		prometheus.DefaultGatherer,
@@ -116,7 +116,7 @@ func metricsHandler() http.Handler {
 			promhttp.HandlerOpts{
 				ErrorHandling: promhttp.ContinueOnError,
 			}),
-	)
+	), nil
 
 }
 

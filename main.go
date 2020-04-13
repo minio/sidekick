@@ -43,6 +43,7 @@ import (
 	"github.com/minio/cli"
 	"github.com/minio/minio/pkg/console"
 	"github.com/minio/minio/pkg/ellipses"
+	"github.com/sirupsen/logrus"
 )
 
 const slashSeparator = "/"
@@ -57,13 +58,16 @@ var (
 	globalTermTable      *widgets.Table
 	globalConnStats      []*ConnStats
 	timeZero             = time.Time{}
+
+	// Create a new instance of the logger. You can have any number of instances.
+	log = logrus.New()
 )
 
 const (
 	prometheusMetricsPath = "/.prometheus/metrics"
 )
 
-func log(msg logMessage) error {
+func logMsg(msg logMessage) error {
 	if globalQuietEnabled {
 		return nil
 	}
@@ -177,15 +181,20 @@ type BackendStats struct {
 func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	if err != nil {
 		if globalLoggingEnabled {
-			log(logMessage{Endpoint: b.endpoint, Error: err})
+			logMsg(logMessage{Endpoint: b.endpoint, Error: err})
 		}
 		b.up = false
 	}
 }
 
 // registerMetricsRouter - add handler functions for metrics.
-func registerMetricsRouter(router *mux.Router) {
-	router.Handle(prometheusMetricsPath, metricsHandler())
+func registerMetricsRouter(router *mux.Router) error {
+	handler, err := metricsHandler()
+	if err != nil {
+		return err
+	}
+	router.Handle(prometheusMetricsPath, handler)
+	return nil
 }
 
 // healthCheck - background routine which checks if a backend is up or down.
@@ -196,7 +205,7 @@ func (b *Backend) healthCheck() {
 		req, err := http.NewRequest(http.MethodGet, healthCheckURL, nil)
 		if err != nil {
 			if globalLoggingEnabled {
-				log(logMessage{Endpoint: b.endpoint, Error: err})
+				logMsg(logMessage{Endpoint: b.endpoint, Error: err})
 			}
 			b.up = false
 			time.Sleep(time.Duration(b.healthCheckDuration) * time.Second)
@@ -208,7 +217,7 @@ func (b *Backend) healthCheck() {
 		if err != nil {
 			b.httpClient.CloseIdleConnections()
 			if globalLoggingEnabled && ((b.up == BackendDown) || (b.Stats.UpSince.Equal(timeZero))) {
-				log(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
+				logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
 			}
 			if b.up {
 				b.up = false
@@ -229,7 +238,7 @@ func (b *Backend) healthCheck() {
 					downtimeEnd = now
 				}
 				if globalLoggingEnabled && (b.up == BackendDown) && (!b.Stats.UpSince.Equal(timeZero)) {
-					log(logMessage{Endpoint: b.endpoint, Status: "up", downtimeStart: b.DowntimeStart, downtimeEnd: downtimeEnd})
+					logMsg(logMessage{Endpoint: b.endpoint, Status: "up", downtimeStart: b.DowntimeStart, downtimeEnd: downtimeEnd})
 				}
 				b.Stats.UpSince = time.Now()
 				b.DowntimeStart = timeZero
@@ -463,6 +472,12 @@ func checkMain(ctx *cli.Context) {
 func sidekickMain(ctx *cli.Context) {
 	checkMain(ctx)
 
+	log.SetFormatter(&logrus.TextFormatter{
+		DisableColors: true,
+		FullTimestamp: true,
+	})
+	log.SetReportCaller(true)
+
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthCheckDuration := ctx.GlobalInt("health-duration")
 	addr := ctx.GlobalString("address")
@@ -574,7 +589,9 @@ func sidekickMain(ctx *cli.Context) {
 		console.Infoln("Listening on", addr)
 	}
 	router := mux.NewRouter().SkipClean(true).UseEncodedPath()
-	registerMetricsRouter(router)
+	if err := registerMetricsRouter(router); err != nil {
+		console.Fatalln(err)
+	}
 	router.PathPrefix("/").Handler(&loadBalancer{
 		backends:  backends,
 		next:      randInt,
