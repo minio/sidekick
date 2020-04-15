@@ -16,6 +16,9 @@
 # Download
 [Download Binary Releases](https://github.com/minio/sidekick/releases) for various platforms.
 
+# Architecture
+![architecture](arch_sidekick.png)
+
 # Usage
 
 ```
