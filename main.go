@@ -427,7 +427,9 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           newCustomDialContext(5*time.Second, 5*time.Second),
-		MaxIdleConnsPerHost:   256,
+		MaxIdleConns:          256,
+		MaxIdleConnsPerHost:   16,
+		MaxConnsPerHost:       256,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   30 * time.Second,
 		ExpectContinueTimeout: 30 * time.Second,
