@@ -36,8 +36,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fatih/color"
-	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
 	"github.com/gorilla/mux"
 	"github.com/minio/cli"
@@ -490,20 +488,6 @@ func sidekickMain(ctx *cli.Context) {
 	globalConsoleDisplay = globalLoggingEnabled || globalTraceEnabled
 	globalDebugEnabled = ctx.GlobalBool("debug")
 
-	if globalConsoleDisplay {
-		console.SetColor("LogMsgType", color.New(color.FgHiMagenta))
-		console.SetColor("TraceMsgType", color.New(color.FgYellow))
-		console.SetColor("Stat", color.New(color.FgYellow))
-		console.SetColor("Request", color.New(color.FgCyan))
-		console.SetColor("Method", color.New(color.Bold, color.FgWhite))
-		console.SetColor("Host", color.New(color.Bold, color.FgGreen))
-		console.SetColor("ReqHeaderKey", color.New(color.Bold, color.FgWhite))
-		console.SetColor("RespHeaderKey", color.New(color.Bold, color.FgCyan))
-		console.SetColor("RespStatus", color.New(color.Bold, color.FgYellow))
-		console.SetColor("ErrStatus", color.New(color.Bold, color.FgRed))
-		console.SetColor("Response", color.New(color.FgGreen))
-	}
-
 	if !strings.HasPrefix(healthCheckPath, slashSeparator) {
 		healthCheckPath = slashSeparator + healthCheckPath
 	}
@@ -556,40 +540,16 @@ func sidekickMain(ctx *cli.Context) {
 		backends = append(backends, backend)
 		globalConnStats = append(globalConnStats, newConnStats(endpoint))
 	}
+	initUI(backends)
+	if globalConsoleDisplay {
+		console.Infoln("Listening on", addr)
+	}
 
 	nBig, err := crand.Int(crand.Reader, big.NewInt(int64(len(backends))))
 	if err != nil {
 		panic(err)
 	}
 	randInt := int(nBig.Int64())
-	if !globalConsoleDisplay {
-		if err := ui.Init(); err != nil {
-			console.Fatalln("failed to initialize termui: %v", err)
-		}
-		defer ui.Close()
-		globalTermTable = initTermTable(backends)
-
-		go func(backends []*Backend) {
-			tickerCount := 1
-			uiEvents := ui.PollEvents()
-			ticker := time.NewTicker(time.Second).C
-			for {
-				select {
-				case e := <-uiEvents:
-					switch e.ID {
-					case "q", "<C-c>":
-						os.Exit(0)
-					}
-				case <-ticker:
-					termTrace(backends, globalTermTable)
-					ui.Render(globalTermTable)
-					tickerCount++
-				}
-			}
-		}(backends)
-	} else {
-		console.Infoln("Listening on", addr)
-	}
 	router := mux.NewRouter().SkipClean(true).UseEncodedPath()
 	if err := registerMetricsRouter(router); err != nil {
 		console.Fatalln(err)

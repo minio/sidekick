@@ -374,7 +374,7 @@ func initTermTable(backends []*Backend) *widgets.Table {
 	table.Rows = make([][]string, len(backends)+1)
 	maxEndpointWidth := 0
 	table.Rows[0] =
-		[]string{"Host", "Status", "TotCalls", "TotFailures", "Rx", "Tx", "Cum Downtime", "Last Downtime", "Min Latency", "Max Latency"}
+		[]string{"Host", "Status", "TotCalls", "TotFailures", "Rx", "Tx", "Tot Downtime", "Last Downtime", "Min Latency", "Max Latency"}
 	for i, b := range backends {
 		row := []string{
 			b.endpoint,
@@ -385,8 +385,8 @@ func initTermTable(backends []*Backend) *widgets.Table {
 			humanize.IBytes(uint64(b.Stats.Tx)),
 			b.Stats.CumDowntime.Round(time.Microsecond).String(),
 			b.Stats.LastDowntime.Round(time.Microsecond).String(),
-			"",
-			""}
+			"Calculating...",
+			"Calculating..."}
 		table.Rows[i+1] = row
 		if len(b.endpoint) > maxEndpointWidth {
 			maxEndpointWidth = len(b.endpoint)
@@ -403,13 +403,13 @@ func initTermTable(backends []*Backend) *widgets.Table {
 func termTrace(backends []*Backend, t *widgets.Table) {
 	idx := 0
 	t.Rows[idx] =
-		[]string{"Host", "Status", "TotCalls", "TotFailures", "Rx", "Tx", "Cum Downtime", "Last Downtime", "Min Latency", "Max Latency"}
+		[]string{"Host", "Status", "TotCalls", "TotFailures", "Rx", "Tx", "Tot Downtime", "Last Downtime", "Min Latency", "Max Latency"}
 	idx++
 	for _, b := range backends {
 		b.Stats.Lock()
 		defer b.Stats.Unlock()
-		minLatency := ""
-		maxLatency := ""
+		minLatency := "Calculating..."
+		maxLatency := "Calculating..."
 		if b.Stats.MaxLatency > 0 {
 			minLatency = fmt.Sprintf("%2s", b.Stats.MinLatency.Round(time.Microsecond))
 			maxLatency = fmt.Sprintf("%2s", b.Stats.MaxLatency.Round(time.Microsecond))
