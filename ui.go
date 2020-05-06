@@ -16,13 +16,85 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
 	ui "github.com/gizak/termui/v3"
+	"github.com/gizak/termui/v3/widgets"
 	"github.com/minio/minio/pkg/console"
 )
+
+func initTermTable(backends []*Backend) *widgets.Table {
+	table := widgets.NewTable()
+	table.TextStyle = ui.NewStyle(ui.ColorWhite)
+	table.SetRect(0, 0, 140, 20)
+	table.Rows = make([][]string, len(backends)+1)
+	maxEndpointWidth := 0
+	idx := 0
+	table.Rows[idx] =
+		[]string{"Host", "Status", "TotCalls", "TotFailures", "Rx", "Tx", "Tot Downtime", "Last Downtime", "Min Latency", "Max Latency"}
+	idx++
+	for _, b := range backends {
+		row := []string{
+			b.endpoint,
+			b.getServerStatus(),
+			strconv.FormatInt(b.Stats.TotCalls, 10),
+			strconv.FormatInt(b.Stats.TotCallFailures, 10),
+			humanize.IBytes(uint64(b.Stats.Rx)),
+			humanize.IBytes(uint64(b.Stats.Tx)),
+			b.Stats.CumDowntime.Round(time.Microsecond).String(),
+			b.Stats.LastDowntime.Round(time.Microsecond).String(),
+			"Calculating...",
+			"Calculating..."}
+		table.Rows[idx] = row
+		if len(b.endpoint) > maxEndpointWidth {
+			maxEndpointWidth = len(b.endpoint)
+		}
+		idx++
+	}
+	table.ColumnWidths = []int{maxEndpointWidth + 2, 7, 10, 12, 10, 10, 15, 15, 15, 15}
+	table.FillRow = true
+	table.BorderStyle = ui.NewStyle(ui.ColorGreen)
+	table.RowSeparator = true
+	ui.Render(table)
+	return table
+}
+
+func termUI(backends []*Backend, t *widgets.Table) {
+	idx := 0
+	t.Rows[idx] =
+		[]string{"Host", "Status", "TotCalls", "TotFailures", "Rx", "Tx", "Tot Downtime", "Last Downtime", "Min Latency", "Max Latency"}
+	idx++
+	for _, b := range backends {
+		b.Stats.Lock()
+		defer b.Stats.Unlock()
+		minLatency := "Calculating..."
+		maxLatency := "Calculating..."
+		if b.Stats.MaxLatency > 0 {
+			minLatency = fmt.Sprintf("%2s", b.Stats.MinLatency.Round(time.Microsecond))
+			maxLatency = fmt.Sprintf("%2s", b.Stats.MaxLatency.Round(time.Microsecond))
+		}
+		row := []string{
+			b.endpoint,
+			b.getServerStatus(),
+			strconv.FormatInt(b.Stats.TotCalls, 10),
+			strconv.FormatInt(b.Stats.TotCallFailures, 10),
+			humanize.IBytes(uint64(b.Stats.Rx)),
+			humanize.IBytes(uint64(b.Stats.Tx)),
+			b.Stats.CumDowntime.String(),
+			b.Stats.LastDowntime.String(),
+			minLatency,
+			maxLatency}
+
+		t.Rows[idx] = row
+		idx++
+	}
+	ui.Render(t)
+}
 
 func initUI(backends []*Backend) {
 	if globalConsoleDisplay {
@@ -38,11 +110,10 @@ func initUI(backends []*Backend) {
 		console.SetColor("ErrStatus", color.New(color.Bold, color.FgRed))
 		console.SetColor("Response", color.New(color.FgGreen))
 	} else {
-
 		if err := ui.Init(); err != nil {
 			console.Fatalln("failed to initialize termui: %v", err)
 		}
-		globalTermTable = initTermTable(backends)
+		termTable := initTermTable(backends)
 
 		go func(backends []*Backend) {
 			tickerCount := 1
@@ -58,8 +129,8 @@ func initUI(backends []*Backend) {
 						os.Exit(0)
 					}
 				case <-ticker:
-					termTrace(backends, globalTermTable)
-					ui.Render(globalTermTable)
+					termUI(backends, termTable)
+					ui.Render(termTable)
 					tickerCount++
 				}
 			}

@@ -17,7 +17,6 @@ package main
 
 import (
 	"context"
-	crand "crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -25,7 +24,6 @@ import (
 	"io"
 	"io/ioutil"
 	"math"
-	"math/big"
 	"math/rand"
 	"net"
 	"net/http"
@@ -34,9 +32,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/gizak/termui/v3/widgets"
 	"github.com/gorilla/mux"
 	"github.com/minio/cli"
 	"github.com/minio/minio/pkg/console"
@@ -53,7 +51,6 @@ var (
 	globalTraceEnabled   bool
 	globalJSONEnabled    bool
 	globalConsoleDisplay bool
-	globalTermTable      *widgets.Table
 	globalConnStats      []*ConnStats
 	timeZero             = time.Time{}
 
@@ -71,7 +68,6 @@ func logMsg(msg logMessage) error {
 	}
 	msg.Type = LogMsgType
 	msg.Timestamp = time.Now().UTC()
-	msg.DowntimeDuration = msg.downtimeEnd.Sub(msg.downtimeStart)
 	if !globalLoggingEnabled {
 		return nil
 	}
@@ -105,22 +101,23 @@ type logMessage struct {
 	// Status of endpoint
 	Status string `json:"Status,omitempty"`
 	// Downtime so far
-	downtimeStart    time.Time
-	downtimeEnd      time.Time
 	DowntimeDuration time.Duration `json:"Downtime,omitempty"`
 	Timestamp        time.Time
 }
 
 func (l logMessage) String() string {
 	if l.Error == nil {
-		if !l.downtimeStart.Equal(timeZero) {
-			return fmt.Sprintf("%s%2s: %s  %s is %s Downtime: %s", console.Colorize("LogMsgType", l.Type), "", l.Timestamp.Format(timeFormat),
-				l.Endpoint, l.Status, l.downtimeEnd.Sub(l.downtimeStart))
+		if l.DowntimeDuration > 0 {
+			return fmt.Sprintf("%s%2s: %s  %s is %s Downtime duration: %s",
+				console.Colorize("LogMsgType", l.Type), "",
+				l.Timestamp.Format(timeFormat),
+				l.Endpoint, l.Status, l.DowntimeDuration)
 		}
 		return fmt.Sprintf("%s%2s: %s  %s is %s", console.Colorize("LogMsgType", l.Type), "", l.Timestamp.Format(timeFormat),
 			l.Endpoint, l.Status)
 	}
-	return fmt.Sprintf("%s%2s: %s  %s is %s: %s", console.Colorize("LogMsgType", l.Type), "", l.Timestamp.Format(timeFormat), l.Endpoint, l.Status, l.Error)
+	return fmt.Sprintf("%s%2s: %s  %s is %s: %s", console.Colorize("LogMsgType", l.Type), "",
+		l.Timestamp.Format(timeFormat), l.Endpoint, l.Status, l.Error)
 }
 
 // Backend entity to which requests gets load balanced.
@@ -128,34 +125,29 @@ type Backend struct {
 	endpoint            string
 	proxy               *httputil.ReverseProxy
 	httpClient          *http.Client
-	up                  BackendStatus
+	up                  int32
 	healthCheckPath     string
 	healthCheckDuration int
 	Stats               *BackendStats
-	DowntimeStart       time.Time
 }
 
-// BackendStatus - if true, backend is up.
-type BackendStatus bool
-
-func (b BackendStatus) String() string {
-	if BackendUP {
-		return "up"
-	}
-	return "down"
+func (b *Backend) setOffline() {
+	atomic.StoreInt32(&b.up, 0)
 }
 
-const (
-	// BackendUP - backend is online
-	BackendUP BackendStatus = true
-	// BackendDown - backend is offline
-	BackendDown BackendStatus = false
-)
+func (b *Backend) setOnline() {
+	atomic.StoreInt32(&b.up, 1)
+}
+
+// IsUp returns true if backend is up
+func (b *Backend) IsUp() bool {
+	return atomic.LoadInt32(&b.up) == 1
+}
 
 func (b *Backend) getServerStatus() string {
-	status := "UP"
-	if !b.up {
-		status = "DOWN"
+	status := "DOWN"
+	if b.IsUp() {
+		status = "UP"
 	}
 	return status
 }
@@ -173,6 +165,7 @@ type BackendStats struct {
 	Rx              int64
 	Tx              int64
 	UpSince         time.Time
+	DowntimeStart   time.Time
 }
 
 // ErrorHandler called by httputil.ReverseProxy for errors.
@@ -181,7 +174,7 @@ func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error
 		if globalLoggingEnabled {
 			logMsg(logMessage{Endpoint: b.endpoint, Error: err})
 		}
-		b.up = false
+		b.setOffline()
 	}
 }
 
@@ -205,7 +198,7 @@ func (b *Backend) healthCheck() {
 			if globalLoggingEnabled {
 				logMsg(logMessage{Endpoint: b.endpoint, Error: err})
 			}
-			b.up = false
+			b.setOffline()
 			time.Sleep(time.Duration(b.healthCheckDuration) * time.Second)
 			continue
 		}
@@ -214,14 +207,15 @@ func (b *Backend) healthCheck() {
 		respTime := time.Now().UTC()
 		if err != nil {
 			b.httpClient.CloseIdleConnections()
-			if globalLoggingEnabled && ((b.up == BackendDown) || (b.Stats.UpSince.Equal(timeZero))) {
+			if globalLoggingEnabled && (!b.IsUp() || (b.Stats.UpSince.Equal(timeZero))) {
 				logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
 			}
-			if b.up {
-				b.up = false
+			if b.IsUp() {
+				// observed an error, take the backend down.
+				b.setOffline()
 			}
-			if b.DowntimeStart.Equal(timeZero) {
-				b.DowntimeStart = time.Now().UTC()
+			if b.Stats.DowntimeStart.Equal(timeZero) {
+				b.Stats.DowntimeStart = time.Now().UTC()
 			}
 		} else {
 			// Drain the connection.
@@ -229,19 +223,24 @@ func (b *Backend) healthCheck() {
 			resp.Body.Close()
 			var downtimeEnd time.Time
 			if resp.StatusCode == http.StatusOK {
-				if !b.DowntimeStart.Equal(timeZero) {
+				if !b.Stats.DowntimeStart.Equal(timeZero) {
 					now := time.Now().UTC()
-					downtime := now.Sub(b.DowntimeStart)
-					b.updateDowntime(downtime)
+					b.updateDowntime(now.Sub(b.Stats.DowntimeStart))
 					downtimeEnd = now
 				}
-				if globalLoggingEnabled && (b.up == BackendDown) && (!b.Stats.UpSince.Equal(timeZero)) {
-					logMsg(logMessage{Endpoint: b.endpoint, Status: "up", downtimeStart: b.DowntimeStart, downtimeEnd: downtimeEnd})
+				if globalLoggingEnabled && !b.IsUp() && !b.Stats.UpSince.Equal(timeZero) {
+					logMsg(logMessage{
+						Endpoint:         b.endpoint,
+						Status:           "up",
+						DowntimeDuration: downtimeEnd.Sub(b.Stats.DowntimeStart),
+					})
 				}
 				b.Stats.UpSince = time.Now()
-				b.DowntimeStart = timeZero
+				b.Stats.DowntimeStart = timeZero
 			}
-			b.up = resp.StatusCode == http.StatusOK
+			if resp.StatusCode == http.StatusOK {
+				b.setOnline()
+			}
 		}
 		if globalTraceEnabled {
 			if resp != nil {
@@ -291,66 +290,53 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 
 type loadBalancer struct {
 	backends  []*Backend
-	next      int // next backend the request should go to.
 	listIndex int // List happens on the same backend always as S3 list is stateful for MinIO.
-	sync.RWMutex
 }
 
-// Returns the next backend the request should go to.
-func (lb *loadBalancer) nextProxy() (*httputil.ReverseProxy, int) {
-	lb.Lock()
-	defer lb.Unlock()
-
-	tries := 0
-	idx := 0
-	for {
-		var proxy *httputil.ReverseProxy
-		if lb.backends[lb.next].up {
-			proxy = lb.backends[lb.next].proxy
-			idx = lb.next
-		}
-		lb.next++
-		if lb.next == len(lb.backends) {
-			lb.next = 0
-		}
-		if proxy != nil {
-			return proxy, idx
-		}
-		tries++
-		if tries == len(lb.backends) {
-			break
+func (lb *loadBalancer) upBackends() []*Backend {
+	var backends []*Backend
+	for _, backend := range lb.backends {
+		if backend.IsUp() {
+			backends = append(backends, backend)
 		}
 	}
-	return nil, -1
+	return backends
 }
 
 // Returns the next backend the request should go to.
-func (lb *loadBalancer) listProxy() (*httputil.ReverseProxy, int) {
-	lb.Lock()
-	defer lb.Unlock()
+func (lb *loadBalancer) nextProxy() *Backend {
+	backends := lb.upBackends()
+	if len(backends) == 0 {
+		return nil
+	}
 
+	idx := rng.Intn(len(backends))
+	// random backend from a list of up backends.
+	return backends[idx]
+}
+
+// Returns the next backend the request should go to.
+func (lb *loadBalancer) listProxy() *Backend {
 	tries := 0
 	listIndex := lb.listIndex
-	idx := lb.listIndex
 	for {
-		var proxy *httputil.ReverseProxy
-		if lb.backends[listIndex].up {
-			proxy = lb.backends[listIndex].proxy
-			idx = listIndex
+		var backend *Backend
+		if lb.backends[listIndex].IsUp() {
+			backend = lb.backends[listIndex]
 		}
 		listIndex++
 		if listIndex == len(lb.backends) {
 			listIndex = 0
 		}
-		if proxy != nil {
-			return proxy, idx
+		if backend != nil {
+			return backend
 		}
 		tries++
 		if tries == len(lb.backends) {
 			break
 		}
 	}
-	return nil, -1
+	return nil
 }
 
 func trimPrefixSuffixSlash(p string) string {
@@ -364,23 +350,22 @@ func (lb *loadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	p = trimPrefixSuffixSlash(p)
 
-	var proxy *httputil.ReverseProxy
-	var bkIdx int
+	var backend *Backend
 	if strings.Contains(p, "/") {
 		// Object calls get distributed across the backends.
-		proxy, bkIdx = lb.nextProxy()
+		backend = lb.nextProxy()
 	} else {
 		// Bucket calls always go to the same backend (to accommodate ListObjects which is stateful).
-		proxy, bkIdx = lb.listProxy()
+		backend = lb.listProxy()
 	}
-	if proxy == nil {
+	if backend == nil {
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
 	handlerFn := func(w http.ResponseWriter, r *http.Request) {
-		proxy.ServeHTTP(w, r)
+		backend.proxy.ServeHTTP(w, r)
 	}
-	httpTraceHdrs(handlerFn, w, r, lb.backends[bkIdx])
+	httpTraceHdrs(handlerFn, w, r, backend)
 }
 
 // mustGetSystemCertPool - return system CAs or empty pool in case of error (or windows)
@@ -534,7 +519,7 @@ func sidekickMain(ctx *cli.Context) {
 		stats := BackendStats{MinLatency: time.Duration(24 * time.Hour), MaxLatency: time.Duration(0)}
 		backend := &Backend{endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, false, healthCheckPath, healthCheckDuration, &stats, timeZero}
+		}, 0, healthCheckPath, healthCheckDuration, &stats}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
@@ -545,19 +530,13 @@ func sidekickMain(ctx *cli.Context) {
 		console.Infoln("Listening on", addr)
 	}
 
-	nBig, err := crand.Int(crand.Reader, big.NewInt(int64(len(backends))))
-	if err != nil {
-		panic(err)
-	}
-	randInt := int(nBig.Int64())
 	router := mux.NewRouter().SkipClean(true).UseEncodedPath()
 	if err := registerMetricsRouter(router); err != nil {
 		console.Fatalln(err)
 	}
 	router.PathPrefix("/").Handler(&loadBalancer{
 		backends:  backends,
-		next:      randInt,
-		listIndex: randInt,
+		listIndex: rng.Intn(len(backends)),
 	})
 	if err := http.ListenAndServe(addr, router); err != nil {
 		console.Fatalln(err)
