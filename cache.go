@@ -11,12 +11,11 @@
 // GNU Affero General Public License for more details.
 //
 // You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.package main
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -27,12 +26,12 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -70,17 +69,24 @@ const (
 
 // S3CacheClient client to S3 cache storage.
 type S3CacheClient struct {
+	*minio.Core
 	endpoint            string
 	useTLS              bool
-	api                 *minio.Client
 	httpClient          *http.Client
 	methods             []string
 	bucket              string
-	minSize             uint64
-	up                  bool
+	minSize             int64
+	up                  int32
 	healthCheckDuration time.Duration
 }
 
+func (c *S3CacheClient) setOffline() {
+	atomic.StoreInt32(&c.up, 0)
+
+}
+func (c *S3CacheClient) isOnline() bool {
+	return atomic.LoadInt32(&c.up) == 1
+}
 func (c *S3CacheClient) isCacheable(method string) bool {
 	for _, m := range c.methods {
 		if method == m {
@@ -98,7 +104,7 @@ func (c *S3CacheClient) healthCheck() {
 			if globalLoggingEnabled {
 				logMsg(logMessage{Endpoint: c.endpoint, Error: err})
 			}
-			c.up = false
+			c.setOffline()
 			time.Sleep(time.Duration(c.healthCheckDuration) * time.Second)
 			continue
 		}
@@ -106,12 +112,17 @@ func (c *S3CacheClient) healthCheck() {
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			c.httpClient.CloseIdleConnections()
-			c.up = false
+			c.setOffline()
 		} else {
 			// Drain the connection.
 			io.Copy(ioutil.Discard, resp.Body)
 			resp.Body.Close()
-			c.up = resp.StatusCode >= http.StatusOK && resp.StatusCode <= http.StatusPartialContent
+			if resp.StatusCode >= http.StatusOK && resp.StatusCode <= http.StatusPartialContent {
+				atomic.StoreInt32(&c.up, 1)
+			} else {
+				atomic.StoreInt32(&c.up, 0)
+			}
+
 		}
 		time.Sleep(time.Duration(c.healthCheckDuration) * time.Second)
 	}
@@ -511,14 +522,13 @@ func (c cacheHeader) Range() (rs *HTTPRangeSpec) {
 	return nil
 }
 
-func getPutOpts(h http.Header) minio.PutObjectOptions {
-	var opts minio.PutObjectOptions
-	opts.UserMetadata = make(map[string]string)
+func getPutMetadata(h http.Header) map[string]string {
+	metadata := make(map[string]string)
 	for k, v := range h {
 		key := fmt.Sprintf("%s%s", amzMetaPrefix, k)
-		opts.UserMetadata[key] = strings.Join(v, "")
+		metadata[key] = strings.Join(v, "")
 	}
-	return opts
+	return metadata
 }
 func isFresh(cacheCC, reqCC *cacheControl, lastModified time.Time) bool {
 	if cacheCC == nil && reqCC == nil {
@@ -536,23 +546,21 @@ func isFresh(cacheCC, reqCC *cacheControl, lastModified time.Time) bool {
 	return freshCache && freshReq
 }
 
-func cacheHandler(next http.HandlerFunc, w http.ResponseWriter, r *http.Request, b *Backend) http.HandlerFunc {
+func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		clnt := b.cacheClient
-		if clnt == nil || !clnt.isCacheable(r.Method) || !clnt.up {
-			next.ServeHTTP(w, r)
+		if clnt == nil || !clnt.isCacheable(r.Method) || !clnt.isOnline() {
+			b.proxy.ServeHTTP(w, r)
 			return
 		}
 
 		sortURLParams(r.URL)
 		key := generateKey(r.URL, r.Host)
-		coreClient := minio.Core{Client: clnt.api}
 		var opts minio.GetObjectOptions
 		for k, v := range r.Header {
 			opts.Set(k, strings.Join(v, ""))
 		}
-
-		reader, oi, _, cacheErr := coreClient.GetObject(clnt.bucket, key, opts)
+		reader, oi, _, cacheErr := clnt.GetObject(clnt.bucket, key, opts)
 		cacheHdrs := getCacheResponseHeaders(oi)
 		cc := parseCacheControlHeaders(cacheHdrs.Header)
 		reqCC := parseCacheControlHeaders(r.Header)
@@ -562,7 +570,7 @@ func cacheHandler(next http.HandlerFunc, w http.ResponseWriter, r *http.Request,
 			defer reader.Close()
 			if reqCC.neverCache() {
 				// for expired content, revert to backend and clear cache.
-				next.ServeHTTP(w, r)
+				b.proxy.ServeHTTP(w, r)
 				return
 			}
 			serveCache = isFresh(cc, reqCC, cacheHdrs.LastModified())
@@ -576,30 +584,40 @@ func cacheHandler(next http.HandlerFunc, w http.ResponseWriter, r *http.Request,
 				}
 			}
 		}
-		if r.Method == http.MethodHead {
-			if cacheErr != nil || !serveCache {
-				next.ServeHTTP(w, r)
-				return
-			}
-			for k, v := range cacheHdrs.Header {
-				w.Header().Set(k, strings.Join(v, ","))
-			}
-			if cacheHdrs.Range() != nil {
-				w.WriteHeader(http.StatusPartialContent)
-			} else {
-				w.WriteHeader(http.StatusOK)
-			}
-			return
-		}
 		var result *http.Response
-		var rec *httptest.ResponseRecorder
-		if r.Method == http.MethodGet {
+		var rec *ResponseRecorder
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
 			// either no cached entry or cache entry requires revalidation
 			if !serveCache {
-				rec = httptest.NewRecorder()
-				next.ServeHTTP(rec, r)
+				rec = NewRecorder()
+				go func(rec *ResponseRecorder, b *Backend, r *http.Request) {
+					b.proxy.ServeHTTP(rec, r)
+					rec.finish()
+				}(rec, b, r)
+
 				result = rec.Result()
 				statusCode := result.StatusCode
+
+				if r.Method == http.MethodHead {
+					if cacheErr != nil {
+						b.proxy.ServeHTTP(w, r)
+						return
+					}
+					if result.StatusCode != http.StatusNotModified {
+						b.proxy.ServeHTTP(w, r)
+						return
+					}
+					for k, v := range cacheHdrs.Header {
+						w.Header().Set(k, strings.Join(v, ","))
+					}
+					if cacheHdrs.Range() != nil {
+						w.WriteHeader(http.StatusPartialContent)
+					} else {
+						w.WriteHeader(http.StatusOK)
+					}
+					return
+				}
+
 				if cacheErr != nil && reqCC != nil && reqCC.onlyIfCached {
 					// need to issue a gateway timeout response here.
 					w.WriteHeader(http.StatusGatewayTimeout)
@@ -615,7 +633,7 @@ func cacheHandler(next http.HandlerFunc, w http.ResponseWriter, r *http.Request,
 					}
 				} else if statusCode != http.StatusOK {
 					go func() {
-						clnt.api.RemoveObject(clnt.bucket, key)
+						clnt.RemoveObject(clnt.bucket, key)
 					}()
 					// write backend response and return
 				}
@@ -631,14 +649,14 @@ func cacheHandler(next http.HandlerFunc, w http.ResponseWriter, r *http.Request,
 				// Write object content to response body
 				if _, err := io.Copy(httpWriter, reader); err != nil {
 					if !httpWriter.HasWritten() && !statusCodeWritten { // write error response only if no data or headers has been written to client yet
-						next.ServeHTTP(w, r)
+						b.proxy.ServeHTTP(w, r)
 					}
 					return
 				}
 
 				if err := httpWriter.Close(); err != nil {
 					if !httpWriter.HasWritten() && !statusCodeWritten { // write error response only if no data or headers has been written to client yet
-						next.ServeHTTP(w, r)
+						b.proxy.ServeHTTP(w, r)
 						return
 					}
 				}
@@ -647,39 +665,52 @@ func cacheHandler(next http.HandlerFunc, w http.ResponseWriter, r *http.Request,
 			for k, v := range result.Header {
 				w.Header().Set(k, strings.Join(v, ","))
 			}
-			value := rec.Body.Bytes()
-			statusCode := result.StatusCode
-			w.WriteHeader(statusCode)
-			w.Write(value)
+
+			mustCache := true
+			resultContentLength := result.ContentLength
 			respCC := parseCacheControlHeaders(result.Header)
-			if respCC.neverCache() || len(value) < int(clnt.minSize) {
+			if respCC.neverCache() || resultContentLength < clnt.minSize {
 				if cacheErr == nil {
 					go func() {
-						clnt.api.RemoveObject(clnt.bucket, key)
+						clnt.RemoveObject(clnt.bucket, key)
 					}()
 				}
-				return
+				mustCache = false
 			}
 			rs := result.Header.Get(xhttp.ContentRange)
 			if rs != "" {
 				// Avoid caching range GET's for now.
 				if cacheErr == nil {
 					go func() {
-						clnt.api.RemoveObject(clnt.bucket, key)
+						clnt.RemoveObject(clnt.bucket, key)
 					}()
+				}
+				mustCache = false
+			}
+
+			if !mustCache || result.ContentLength < clnt.minSize {
+				if _, err := io.Copy(w, io.LimitReader(result.Body, result.ContentLength)); err != nil {
+					logger.LogIf(context.Background(), err)
 				}
 				return
 			}
 
+			pipeReader, pipeWriter := io.Pipe()
+			mw := cacheMultiWriter(w, pipeWriter)
 			go func() {
-				opts := getPutOpts(result.Header)
-				_, err := clnt.api.PutObject(clnt.bucket, key, bytes.NewReader(value), int64(len(value)), opts)
+				_, err := clnt.PutObject(clnt.bucket, key,
+					io.LimitReader(pipeReader, resultContentLength), resultContentLength,
+					"", "", getPutMetadata(result.Header), nil)
 				if err != nil {
-					clnt.up = false
+					clnt.setOffline()
 					logger.LogIf(context.Background(), err, "Failed to cache object")
 				}
+				pipeReader.CloseWithError(err)
 			}()
-			return
+			_, err := io.Copy(mw, io.LimitReader(result.Body, result.ContentLength))
+			if err != nil {
+				logger.LogIf(context.Background(), err)
+			}
 		}
 	}
 }
@@ -706,7 +737,7 @@ func newCacheConfig() *cacheConfig {
 		console.Fatalln(fmt.Errorf("One or more of AccessKey:%s SecretKey: %s Bucket:%s missing", accessKey, secretKey, bucket), "Missing cache configuration")
 	}
 	minSizeStr := os.Getenv(EnvCacheMinSize)
-	var minSize uint64
+	minSize := uint64(1024 * 1024)
 	var err error
 	if minSizeStr != "" {
 		minSize, err = humanize.ParseBytes(minSizeStr)
@@ -791,7 +822,7 @@ func newCacheClient(ctx *cli.Context, cfg *cacheConfig) *S3CacheClient {
 	// Set app info.
 	api.SetAppInfo(ctx.App.Name, ctx.App.Version)
 	// Store the new api object.
-	s3Clnt.api = api
+	s3Clnt.Core = &minio.Core{Client: api}
 	cfg.endpoint = strings.TrimSuffix(cfg.endpoint, slashSeparator)
 
 	target, err := url.Parse(cfg.endpoint)
@@ -811,7 +842,7 @@ func newCacheClient(ctx *cli.Context, cfg *cacheConfig) *S3CacheClient {
 	}
 	s3Clnt.methods = []string{http.MethodGet, http.MethodHead}
 	s3Clnt.bucket = cfg.bucket
-	s3Clnt.minSize = cfg.minSize
+	s3Clnt.minSize = int64(cfg.minSize)
 	s3Clnt.healthCheckDuration = cfg.duration
 	s3Clnt.endpoint = cfg.endpoint
 	s3Clnt.useTLS = target.Scheme == "https"

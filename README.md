@@ -170,7 +170,7 @@ S3 compatible object store can be configured for shared cache storage
 Caching can be enabled by setting the cache environment variables for sidekick which specify
 the endpoint of S3 compatible object store, access key, secret key to authenticate to the store.
 Objects are cached on GET to the shared store if object from the backend exceeds a configurable
-minimum size.
+minimum size. Default minimum size is 1MB
 ```bash
 export SIDEKICK_CACHE_ENDPOINT="https://minio:9080"
 export SIDEKICK_CACHE_ACCESS_KEY="minio"

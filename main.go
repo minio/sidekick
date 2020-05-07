@@ -364,15 +364,12 @@ func (lb *loadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
-	handlerFn := func(w http.ResponseWriter, r *http.Request) {
-		backend.proxy.ServeHTTP(w, r)
-	}
 
 	cacheHandlerFn := func(w http.ResponseWriter, r *http.Request) {
 		if backend.cacheClient != nil {
-			cacheHandler(handlerFn, w, r, backend)(w, r)
+			cacheHandler(w, r, backend)(w, r)
 		} else {
-			handlerFn(w, r)
+			backend.proxy.ServeHTTP(w, r)
 		}
 	}
 
