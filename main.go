@@ -129,6 +129,8 @@ type Backend struct {
 	healthCheckPath     string
 	healthCheckDuration int
 	Stats               *BackendStats
+	DowntimeStart       time.Time
+	cacheClient         *S3CacheClient
 }
 
 func (b *Backend) setOffline() {
@@ -362,10 +364,17 @@ func (lb *loadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
-	handlerFn := func(w http.ResponseWriter, r *http.Request) {
-		backend.proxy.ServeHTTP(w, r)
+
+	cacheHandlerFn := func(w http.ResponseWriter, r *http.Request) {
+		if backend.cacheClient != nil {
+			cacheHandler(w, r, backend)(w, r)
+		} else {
+			backend.proxy.ServeHTTP(w, r)
+		}
 	}
-	httpTraceHdrs(handlerFn, w, r, backend)
+
+	httpTraceHdrs(cacheHandlerFn, w, r, backend)
+
 }
 
 // mustGetSystemCertPool - return system CAs or empty pool in case of error (or windows)
@@ -496,6 +505,7 @@ func sidekickMain(ctx *cli.Context) {
 		endpoints = ctx.Args()
 	}
 
+	cacheCfg := newCacheConfig()
 	var backends []*Backend
 	for _, endpoint := range endpoints {
 		endpoint = strings.TrimSuffix(endpoint, slashSeparator)
@@ -519,7 +529,7 @@ func sidekickMain(ctx *cli.Context) {
 		stats := BackendStats{MinLatency: time.Duration(24 * time.Hour), MaxLatency: time.Duration(0)}
 		backend := &Backend{endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckPath, healthCheckDuration, &stats}
+		}, 0, healthCheckPath, healthCheckDuration, &stats, timeZero, newCacheClient(ctx, cacheCfg)}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
