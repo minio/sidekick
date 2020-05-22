@@ -211,6 +211,8 @@ func (n *nodesView) populate(backends []*Backend) {
 				text = b.getServerStatus()
 				if text == "UP" {
 					cell.SetTextColor(tcell.ColorGreenYellow)
+				} else {
+					cell.SetTextColor(tcell.ColorIndianRed)
 				}
 			case 2:
 				text = strconv.FormatInt(b.Stats.TotCalls, 10)
