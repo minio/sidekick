@@ -19,6 +19,8 @@
 # Architecture
 ![architecture](arch_sidekick.png)
 
+**Demo** ![sidekick-demo](sidekick-demo.gif)
+
 # Usage
 
 ```
