@@ -30,8 +30,7 @@ import (
 )
 
 var (
-	app        *tview.Application
-	nodesTable *nodesView
+	app *tview.Application
 )
 
 type nodesView struct {
@@ -51,7 +50,8 @@ func initNodesTable() *nodesView {
 	t.SetBorderColor(tcell.ColorTeal)
 	t.SetBordersColor(tcell.ColorTeal)
 
-	header := []string{"HOST",
+	header := []string{"SITE",
+		"HOST",
 		"STATUS",
 		"CALLS",
 		"FAILURES",
@@ -63,9 +63,9 @@ func initNodesTable() *nodesView {
 		"MAX LATENCY"}
 
 	return &nodesView{t, header}
-
 }
-func initUI(backends []*Backend) {
+
+func initUI(m *multisite) {
 	if globalConsoleDisplay {
 		console.SetColor("LogMsgType", color.New(color.FgHiMagenta))
 		console.SetColor("TraceMsgType", color.New(color.FgYellow))
@@ -79,17 +79,25 @@ func initUI(backends []*Backend) {
 		console.SetColor("ErrStatus", color.New(color.Bold, color.FgRed))
 		console.SetColor("Response", color.New(color.FgGreen))
 	} else {
-		grid := tview.NewGrid().SetRows(2, 3).SetBorders(false)
+		grid := tview.NewGrid().SetRows(-6, -94).SetBorders(false)
 		grid.SetBorderColor(tcell.ColorTeal)
-		nodesTable = initNodesTable()
-		nodesTable.populate(backends)
-		frame := tview.NewFrame(tview.NewBox().SetBackgroundColor(tcell.ColorWhite)).
-			SetBorders(2, 2, 2, 2, 4, 4).
+		frame := tview.NewFrame(tview.NewBox()).
+			SetBorders(1, 1, 1, 1, 1, 1).
 			AddText("ｓｉｄｅｋｉｃｋ", true, tview.AlignCenter, tcell.ColorWhite).
 			AddText("<ctrl-c> Quit", true, tview.AlignRight, tcell.ColorSlateGray)
 
 		grid.AddItem(frame, 0, 0, 3, 1, 0, 100, false)
-		grid.AddItem(nodesTable, 2, 0, 20, 1, 0, 100, true)
+		nodesTable := initNodesTable()
+		nodesTable.populate(m)
+		grid.AddItem(nodesTable, 1, 0, 1, 1, 0, 0, true)
+		go func() {
+			for {
+				time.Sleep(time.Millisecond * 500)
+				app.QueueUpdateDraw(func() {
+					nodesTable.populate(m)
+				})
+			}
+		}()
 
 		app = tview.NewApplication()
 		app.SetBeforeDrawFunc(func(s tcell.Screen) bool {
@@ -112,15 +120,6 @@ func initUI(backends []*Backend) {
 			return event
 		})
 
-		go func(backends []*Backend) {
-			for {
-				time.Sleep(time.Millisecond * 500)
-				app.QueueUpdateDraw(func() {
-					nodesTable.populate(backends)
-
-				})
-			}
-		}(backends)
 		go func() {
 			if err := app.SetRoot(grid, true).SetFocus(grid).Run(); err != nil {
 				panic(err)
@@ -183,18 +182,26 @@ func (n *nodesView) getStylizedCell(backends []*Backend, row, col int, header bo
 
 	return cell
 }
-func (n *nodesView) populate(backends []*Backend) {
+
+func (n *nodesView) populate(m *multisite) int {
 	n.Clear()
-	rows, cols := len(backends), len(n.header)
-	fixRows := 1
+	var backends []*Backend
+	for _, s := range m.sites {
+		backends = append(backends, s.backends...)
+	}
+	rows := len(backends) + 1
+	cols := len(n.header)
+
 	var cell *tview.TableCell
-	for r := 0; r < rows; r++ {
+	for c := 0; c < cols; c++ {
+		cell = n.getStylizedCell(backends, 0, c, true)
+		cell.SetText(n.header[c])
+		n.SetCell(0, c, cell)
+	}
+
+	fixedRows := 1
+	for r := 0; r < (rows - fixedRows); r++ {
 		for c := 0; c < cols; c++ {
-			if r == 0 {
-				cell = n.getStylizedCell(backends, r, c, true)
-				cell.SetText(n.header[c])
-				n.SetCell(r, c, cell)
-			}
 			cell = n.getStylizedCell(backends, r, c, false)
 			b := backends[r]
 			minLatency := "0s"
@@ -206,33 +213,36 @@ func (n *nodesView) populate(backends []*Backend) {
 			var text string
 			switch c {
 			case 0:
-				text = b.endpoint
+				text = humanize.Ordinal(b.siteNumber)
 			case 1:
+				text = b.endpoint
+			case 2:
 				text = b.getServerStatus()
 				if text == "UP" {
 					cell.SetTextColor(tcell.ColorGreenYellow)
 				} else {
 					cell.SetTextColor(tcell.ColorIndianRed)
 				}
-			case 2:
-				text = strconv.FormatInt(b.Stats.TotCalls, 10)
 			case 3:
-				text = strconv.FormatInt(b.Stats.TotCallFailures, 10)
+				text = strconv.FormatInt(b.Stats.TotCalls, 10)
 			case 4:
-				text = humanize.IBytes(uint64(b.Stats.Rx))
+				text = strconv.FormatInt(b.Stats.TotCallFailures, 10)
 			case 5:
-				text = humanize.IBytes(uint64(b.Stats.Tx))
+				text = humanize.IBytes(uint64(b.Stats.Rx))
 			case 6:
-				text = b.Stats.CumDowntime.Round(time.Microsecond).String()
+				text = humanize.IBytes(uint64(b.Stats.Tx))
 			case 7:
-				text = b.Stats.LastDowntime.Round(time.Microsecond).String()
+				text = b.Stats.CumDowntime.Round(time.Microsecond).String()
 			case 8:
-				text = minLatency
+				text = b.Stats.LastDowntime.Round(time.Microsecond).String()
 			case 9:
+				text = minLatency
+			case 10:
 				text = maxLatency
 			}
 			cell.SetText(text)
-			n.SetCell(r+fixRows, c, cell)
+			n.SetCell(r+fixedRows, c, cell)
 		}
 	}
+	return rows
 }

@@ -25,8 +25,7 @@
 
 ```
 USAGE:
-  sidekick [FLAGS] ENDPOINTs...
-  sidekick [FLAGS] ENDPOINT{1...N}
+  sidekick [FLAGS] SITE1 [SITE2..]
 
 FLAGS:
   --address value, -a value          listening address for sidekick (default: ":8080")
@@ -40,6 +39,10 @@ FLAGS:
   --debug                            output verbose trace
   --help, -h                         show help
   --version, -v                      print the version
+
+SITE:
+Each SITE is a comma separated list of zones of that site: http://172.17.0.{2..5},http://172.17.0.{6..9}
+If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
 ```
 
 ## Examples
@@ -54,10 +57,12 @@ $ sidekick --health-path=/ready http://myapp.myorg.dom
 $ sidekick --health-path=/minio/health/ready --address :8000 http://minio{1...4}:9000
 ```
 
-- Load balance across 16 MinIO Servers (http://minio1:9000 to http://minio16:9000)
+- Two sites, each site having two zones, each zone having 4 servers:
 ```
-$ sidekick --health-path=/minio/health/ready http://minio{1...16}:9000
+$ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
 ```
+Note that the two sites are separated by space character.
+If all the servers in site-1 are down, then sidekick will failover to site-2.
 
 ## Realworld Example with spark-orchestrator
 
