@@ -166,13 +166,16 @@ kubectl create -f spark-job.yaml
 kubectl logs -f --namespace spark-operator spark-minio-app-driver spark-kubernetes-driver
 ```
 
-### S3 Cache
-S3 compatible object store can be configured for shared cache storage
+### High Performance S3 Cache
+S3 compatible object store can be configured for shared cache storage.
+This will allow applications using Sidekick load balancer to share a distributed cache, thus allowing hot tier caching. The cache can be
+any S3 compatible object store either within the network or remote,
+offering vastly improved time to first byte for applications, while also
+fully utilizing cache storage capacity and reducing network traffic.
 
-Caching can be enabled by setting the cache environment variables for sidekick which specify
-the endpoint of S3 compatible object store, access key, secret key to authenticate to the store.
-Objects are cached on GET to the shared store if object from the backend exceeds a configurable
-minimum size. Default minimum size is 1MB
+#### Enabling cache
+Caching can be enabled by setting the cache environment variables for sidekick which specify the endpoint of S3 compatible object store, access key, secret key to authenticate to the store.
+Objects are cached on GET to the shared store if object from the backend exceeds a configurable minimum size. Default minimum size is 1MB.
 ```bash
 export SIDEKICK_CACHE_ENDPOINT="https://minio:9080"
 export SIDEKICK_CACHE_ACCESS_KEY="minio"
@@ -183,4 +186,13 @@ export SIDEKICK_CACHE_HEALTH_DURATION=20
 $ sidekick --health-path=/ready http://myapp.myorg.dom
 ```
 
+Sidekick cache layer is implemented as a high performance middleware wrapper around the Sidekick load balancer. All GET requests that qualify for caching per the RFC 7234 cache specifications and exceeding minimum configured size are streamed simultaneously to the application and the S3 cache. This allows simple, fast and zero memory overhead caching without affecting performance.
 
+If an object is already cached to S3 store, the ETag and LastModified date are verified with the backend unless the Cache-Control header explicitly specifies "immutable" or "only-if-cached". Any cached entry that fails the ETag and/or LastModified checks or deleted from the backend is cache evicted automatically.
+
+When a cache resource is stale, the resource is validated with the backend with a If-None-Match header to check if it is in fact still fresh. If so, the backend returns a 304 (Not Modified) header without sending the body of the requested resource, saving some bandwidth.
+
+Sidekick cache honors standard caching policies specified in request and response directives.
+
+Limitations:
+Range GET requests are currently not cached.
