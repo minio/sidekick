@@ -152,7 +152,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.3.0"
+      image: "minio/sidekick:v0.4.0"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       ports:
@@ -166,7 +166,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.3.0"
+      image: "minio/sidekick:v0.4.0"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       ports:
@@ -236,7 +236,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.3.0"
+      image: "minio/sidekick:v0.4.0"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       env:
@@ -263,7 +263,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.3.0"
+      image: "minio/sidekick:v0.4.0"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       env:
