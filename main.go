@@ -43,10 +43,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const (
-	colonSeparator = ":"
-	slashSeparator = "/"
-)
+const slashSeparator = "/"
 
 var (
 	globalQuietEnabled   bool
@@ -199,10 +196,13 @@ func registerMetricsRouter(router *mux.Router) error {
 // getHealthCheckURL - extracts the health check URL.
 func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) string {
 	healthCheckURL, _ := url.Parse(strings.TrimSuffix(endpoint, slashSeparator) + healthCheckPath)
-	if healthCheckPort != 0 {
-		host, _, _ := net.SplitHostPort(healthCheckURL.Host)
-		healthCheckURL.Host = host + colonSeparator + strconv.Itoa(healthCheckPort)
+	if healthCheckPort == 0 {
+		return healthCheckURL.String()
 	}
+
+	// Set health check port
+	host, _, _ := net.SplitHostPort(healthCheckURL.Host)
+	healthCheckURL.Host = net.JoinHostPort(host, strconv.Itoa(healthCheckPort))
 
 	return healthCheckURL.String()
 }
