@@ -2,16 +2,23 @@
 
 *sidekick* is a high-performance sidecar load-balancer. By attaching a tiny load balancer as a sidecar to each of the client application processes, you can eliminate the centralized loadbalancer bottleneck and DNS failover management. *sidekick* automatically avoids sending traffic to the failed servers by checking their health via the readiness API and HTTP error returns.
 
+<!-- markdown-toc start - Don't edit this section. Run M-x markdown-toc-refresh-toc -->
 **Table of Contents**
 
 - [Download](#download)
+- [Architecture](#architecture)
 - [Usage](#usage)
     - [Examples](#examples)
     - [Realworld Example with spark-orchestrator](#realworld-example-with-spark-orchestrator)
         - [Configure *spark-orchestrator*](#configure-spark-orchestrator)
         - [Install *MinIO*](#install-minio)
-        - [Run the spark job](#run-the-spark-job)
-    - [Roadmap](#roadmap)
+        - [Run the spark job in k8s](#run-the-spark-job-in-k8s)
+        - [High Performance S3 Cache](#high-performance-s3-cache)
+            - [Run sidekick configured with high performance cache on baremetal](#run-sidekick-configured-with-high-performance-cache-on-baremetal)
+            - [Run the spark job in k8s](#run-the-spark-job-in-k8s-1)
+            - [Features](#features)
+
+<!-- markdown-toc end -->
 
 # Download
 [Download Binary Releases](https://github.com/minio/sidekick/releases) for various platforms.
@@ -104,7 +111,7 @@ mc mb minio-distributed/mybucket
 mc cp /etc/hosts minio-distributed/mybucket/mydata/{1..4}.txt
 ```
 
-### Run the spark job
+### Run the spark job in k8s
 
 ```yml
 apiVersion: "sparkoperator.k8s.io/v1beta2"
@@ -187,7 +194,7 @@ export SIDEKICK_CACHE_HEALTH_DURATION=20
 sidekick --health-path=/minio/health/ready http://minio{1...16}:9000
 ```
 
-### Run the spark job in k8s
+#### Run the spark job in k8s
 Following example shows on how to configure sidekick as high performance cache sidecar with spark orchestrator framework on kubernetes environment.
 
 ```yml
