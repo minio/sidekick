@@ -122,6 +122,7 @@ func (l logMessage) String() string {
 
 // Backend entity to which requests gets load balanced.
 type Backend struct {
+	siteNumber          int
 	endpoint            string
 	proxy               *httputil.ReverseProxy
 	httpClient          *http.Client
@@ -207,7 +208,12 @@ func (b *Backend) healthCheck() {
 
 		resp, err := b.httpClient.Do(req)
 		respTime := time.Now().UTC()
-		if err != nil {
+		if err == nil {
+			// Drain the connection.
+			io.Copy(ioutil.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		if err != nil || (err == nil && resp.StatusCode != http.StatusOK) {
 			b.httpClient.CloseIdleConnections()
 			if globalLoggingEnabled && (!b.IsUp() || (b.Stats.UpSince.Equal(timeZero))) {
 				logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
@@ -220,29 +226,22 @@ func (b *Backend) healthCheck() {
 				b.Stats.DowntimeStart = time.Now().UTC()
 			}
 		} else {
-			// Drain the connection.
-			io.Copy(ioutil.Discard, resp.Body)
-			resp.Body.Close()
 			var downtimeEnd time.Time
-			if resp.StatusCode == http.StatusOK {
-				if !b.Stats.DowntimeStart.Equal(timeZero) {
-					now := time.Now().UTC()
-					b.updateDowntime(now.Sub(b.Stats.DowntimeStart))
-					downtimeEnd = now
-				}
-				if globalLoggingEnabled && !b.IsUp() && !b.Stats.UpSince.Equal(timeZero) {
-					logMsg(logMessage{
-						Endpoint:         b.endpoint,
-						Status:           "up",
-						DowntimeDuration: downtimeEnd.Sub(b.Stats.DowntimeStart),
-					})
-				}
-				b.Stats.UpSince = time.Now()
-				b.Stats.DowntimeStart = timeZero
+			if !b.Stats.DowntimeStart.Equal(timeZero) {
+				now := time.Now().UTC()
+				b.updateDowntime(now.Sub(b.Stats.DowntimeStart))
+				downtimeEnd = now
 			}
-			if resp.StatusCode == http.StatusOK {
-				b.setOnline()
+			if globalLoggingEnabled && !b.IsUp() && !b.Stats.UpSince.Equal(timeZero) {
+				logMsg(logMessage{
+					Endpoint:         b.endpoint,
+					Status:           "up",
+					DowntimeDuration: downtimeEnd.Sub(b.Stats.DowntimeStart),
+				})
 			}
+			b.Stats.UpSince = time.Now()
+			b.Stats.DowntimeStart = timeZero
+			b.setOnline()
 		}
 		if globalTraceEnabled {
 			if resp != nil {
@@ -290,14 +289,37 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 	}
 }
 
-type loadBalancer struct {
+type multisite struct {
+	sites []*site
+}
+
+func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	for _, s := range m.sites {
+		if s.IsUp() {
+			s.ServeHTTP(w, r)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusBadGateway)
+}
+
+type site struct {
 	backends  []*Backend
 	listIndex int // List happens on the same backend always as S3 list is stateful for MinIO.
 }
 
-func (lb *loadBalancer) upBackends() []*Backend {
+func (s *site) IsUp() bool {
+	for _, backend := range s.backends {
+		if backend.IsUp() {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *site) upBackends() []*Backend {
 	var backends []*Backend
-	for _, backend := range lb.backends {
+	for _, backend := range s.backends {
 		if backend.IsUp() {
 			backends = append(backends, backend)
 		}
@@ -306,8 +328,8 @@ func (lb *loadBalancer) upBackends() []*Backend {
 }
 
 // Returns the next backend the request should go to.
-func (lb *loadBalancer) nextProxy() *Backend {
-	backends := lb.upBackends()
+func (s *site) nextProxy() *Backend {
+	backends := s.upBackends()
 	if len(backends) == 0 {
 		return nil
 	}
@@ -318,23 +340,23 @@ func (lb *loadBalancer) nextProxy() *Backend {
 }
 
 // Returns the next backend the request should go to.
-func (lb *loadBalancer) listProxy() *Backend {
+func (s *site) listProxy() *Backend {
 	tries := 0
-	listIndex := lb.listIndex
+	listIndex := s.listIndex
 	for {
 		var backend *Backend
-		if lb.backends[listIndex].IsUp() {
-			backend = lb.backends[listIndex]
+		if s.backends[listIndex].IsUp() {
+			backend = s.backends[listIndex]
 		}
 		listIndex++
-		if listIndex == len(lb.backends) {
+		if listIndex == len(s.backends) {
 			listIndex = 0
 		}
 		if backend != nil {
 			return backend
 		}
 		tries++
-		if tries == len(lb.backends) {
+		if tries == len(s.backends) {
 			break
 		}
 	}
@@ -348,17 +370,17 @@ func trimPrefixSuffixSlash(p string) string {
 }
 
 // ServeHTTP - LoadBalancer implements http.Handler
-func (lb *loadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	p = trimPrefixSuffixSlash(p)
 
 	var backend *Backend
 	if strings.Contains(p, "/") {
 		// Object calls get distributed across the backends.
-		backend = lb.nextProxy()
+		backend = s.nextProxy()
 	} else {
 		// Bucket calls always go to the same backend (to accommodate ListObjects which is stateful).
-		backend = lb.listProxy()
+		backend = s.listProxy()
 	}
 	if backend == nil {
 		w.WriteHeader(http.StatusBadGateway)
@@ -463,33 +485,12 @@ func checkMain(ctx *cli.Context) {
 	}
 }
 
-func sidekickMain(ctx *cli.Context) {
-	checkMain(ctx)
-
-	log.SetFormatter(&logrus.TextFormatter{
-		DisableColors: true,
-		FullTimestamp: true,
-	})
-	log.SetReportCaller(true)
-
-	healthCheckPath := ctx.GlobalString("health-path")
-	healthCheckDuration := ctx.GlobalInt("health-duration")
-	addr := ctx.GlobalString("address")
-	globalLoggingEnabled = ctx.GlobalBool("log")
-	globalTraceEnabled = ctx.GlobalBool("trace")
-	globalJSONEnabled = ctx.GlobalBool("json")
-	globalQuietEnabled = ctx.GlobalBool("quiet")
-	globalConsoleDisplay = globalLoggingEnabled || globalTraceEnabled
-	globalDebugEnabled = ctx.GlobalBool("debug")
-
-	if !strings.HasPrefix(healthCheckPath, slashSeparator) {
-		healthCheckPath = slashSeparator + healthCheckPath
-	}
-
+func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckDuration int) *site {
 	var endpoints []string
-	if ellipses.HasEllipses(ctx.Args()...) {
-		argPatterns := make([]ellipses.ArgPattern, len(ctx.Args()))
-		for i, arg := range ctx.Args() {
+
+	if ellipses.HasEllipses(siteStrs...) {
+		argPatterns := make([]ellipses.ArgPattern, len(siteStrs))
+		for i, arg := range siteStrs {
 			patterns, err := ellipses.FindEllipsesPatterns(arg)
 			if err != nil {
 				console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", arg, err))
@@ -502,7 +503,7 @@ func sidekickMain(ctx *cli.Context) {
 			}
 		}
 	} else {
-		endpoints = ctx.Args()
+		endpoints = siteStrs
 	}
 
 	cacheCfg := newCacheConfig()
@@ -527,7 +528,7 @@ func sidekickMain(ctx *cli.Context) {
 		proxy := httputil.NewSingleHostReverseProxy(target)
 		proxy.Transport = clientTransport(ctx, target.Scheme == "https")
 		stats := BackendStats{MinLatency: time.Duration(24 * time.Hour), MaxLatency: time.Duration(0)}
-		backend := &Backend{endpoint, proxy, &http.Client{
+		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
 		}, 0, healthCheckPath, healthCheckDuration, &stats, timeZero, newCacheClient(ctx, cacheCfg)}
 		go backend.healthCheck()
@@ -535,7 +536,44 @@ func sidekickMain(ctx *cli.Context) {
 		backends = append(backends, backend)
 		globalConnStats = append(globalConnStats, newConnStats(endpoint))
 	}
-	initUI(backends)
+
+	return &site{
+		backends:  backends,
+		listIndex: rng.Intn(len(backends)),
+	}
+}
+
+func sidekickMain(ctx *cli.Context) {
+	checkMain(ctx)
+
+	log.SetFormatter(&logrus.TextFormatter{
+		DisableColors: true,
+		FullTimestamp: true,
+	})
+	log.SetReportCaller(true)
+
+	healthCheckPath := ctx.GlobalString("health-path")
+	healthCheckDuration := ctx.GlobalInt("health-duration")
+	addr := ctx.GlobalString("address")
+	globalLoggingEnabled = ctx.GlobalBool("log")
+	globalTraceEnabled = ctx.GlobalBool("trace")
+	globalJSONEnabled = ctx.GlobalBool("json")
+	globalQuietEnabled = ctx.GlobalBool("quiet")
+	globalConsoleDisplay = globalLoggingEnabled || globalTraceEnabled
+	globalDebugEnabled = ctx.GlobalBool("debug")
+
+	if !strings.HasPrefix(healthCheckPath, slashSeparator) {
+		healthCheckPath = slashSeparator + healthCheckPath
+	}
+
+	var sites []*site
+	for i, siteStrs := range ctx.Args() {
+		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckDuration)
+		sites = append(sites, site)
+	}
+	m := &multisite{sites}
+
+	initUI(m)
 	if globalConsoleDisplay {
 		console.Infoln("Listening on", addr)
 	}
@@ -544,13 +582,11 @@ func sidekickMain(ctx *cli.Context) {
 	if err := registerMetricsRouter(router); err != nil {
 		console.Fatalln(err)
 	}
-	router.PathPrefix("/").Handler(&loadBalancer{
-		backends:  backends,
-		listIndex: rng.Intn(len(backends)),
-	})
+	router.PathPrefix("/").Handler(m)
 	if err := http.ListenAndServe(addr, router); err != nil {
 		console.Fatalln(err)
 	}
+
 }
 
 func main() {
@@ -605,12 +641,16 @@ func main() {
   {{.Description}}
 
 USAGE:
-  sidekick [FLAGS] ENDPOINTs...
-  sidekick [FLAGS] ENDPOINT{1...N}
+  sidekick [FLAGS] SITE1 [SITE2..]
 
 FLAGS:
   {{range .VisibleFlags}}{{.}}
   {{end}}
+
+SITE:
+Each SITE is a comma separated list of zones of that site: http://172.17.0.{2..5},http://172.17.0.{6..9}
+If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
+
 VERSION:
   {{.Version}}
 
@@ -623,6 +663,10 @@ EXAMPLES:
 
   3. Load balance across 4 MinIO Servers using HTTPS and disable TLS certificate validation
      $ sidekick --health-path "/minio/health/ready" --insecure https://minio{1...4}:9000
+
+  4. Two sites, each site having two zones, each zone having 4 servers:
+     $ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
+
 `
 	app.Action = sidekickMain
 	app.Run(os.Args)
