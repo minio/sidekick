@@ -140,7 +140,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.1.4"
+      image: "minio/sidekick:v0.3.0"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       ports:
@@ -154,7 +154,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.1.4"
+      image: "minio/sidekick:v0.3.0"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       ports:
@@ -167,32 +167,122 @@ kubectl logs -f --namespace spark-operator spark-minio-app-driver spark-kubernet
 ```
 
 ### High Performance S3 Cache
-S3 compatible object store can be configured for shared cache storage.
-This will allow applications using Sidekick load balancer to share a distributed cache, thus allowing hot tier caching. The cache can be
-any S3 compatible object store either within the network or remote,
-offering vastly improved time to first byte for applications, while also
-fully utilizing cache storage capacity and reducing network traffic.
+S3 compatible object store can be configured for shared cache storage. This will allow applications using Sidekick load balancer to share a distributed cache, thus allowing hot tier caching. The cache can be any S3 compatible object store either within the network or remote, offering vastly improved time to first byte for applications, while also fully utilizing cache storage capacity and reducing network traffic.
 
-#### Enabling cache
-Caching can be enabled by setting the cache environment variables for sidekick which specify the endpoint of S3 compatible object store, access key, secret key to authenticate to the store.
-Objects are cached on GET to the shared store if object from the backend exceeds a configurable minimum size. Default minimum size is 1MB.
+#### Run sidekick configured with high performance cache on baremetal
+Caching can be enabled by setting the cache environment variables for sidekick which specify the endpoint of S3 compatible object store, access key, secret key to authenticate to the store. Objects are cached on GET to the shared store if object from the backend exceeds a configurable minimum size. Default minimum size is 1MB.
+
 ```bash
-export SIDEKICK_CACHE_ENDPOINT="https://minio:9080"
+export SIDEKICK_CACHE_ENDPOINT="http://minio-remote:9000"
 export SIDEKICK_CACHE_ACCESS_KEY="minio"
 export SIDEKICK_CACHE_SECRET_KEY="minio123"
 export SIDEKICK_CACHE_BUCKET="cache01"
 export SIDEKICK_CACHE_MIN_SIZE=64MB
 export SIDEKICK_CACHE_HEALTH_DURATION=20
-$ sidekick --health-path=/ready http://myapp.myorg.dom
+sidekick --health-path=/minio/health/ready http://minio{1...16}:9000
 ```
 
-Sidekick cache layer is implemented as a high performance middleware wrapper around the Sidekick load balancer. All GET requests that qualify for caching per the RFC 7234 cache specifications and exceeding minimum configured size are streamed simultaneously to the application and the S3 cache. This allows simple, fast and zero memory overhead caching without affecting performance.
+### Run the spark job in k8s
+Following example shows on how to configure sidekick as high performance cache sidecar with spark orchestrator framework on kubernetes environment.
 
-If an object is already cached to S3 store, the ETag and LastModified date are verified with the backend unless the Cache-Control header explicitly specifies "immutable" or "only-if-cached". Any cached entry that fails the ETag and/or LastModified checks or deleted from the backend is cache evicted automatically.
+```yml
+apiVersion: "sparkoperator.k8s.io/v1beta2"
+kind: SparkApplication
+metadata:
+  name: spark-minio-app
+  namespace: spark-operator
+spec:
+  sparkConf:
+    spark.kubernetes.allocation.batch.size: "50"
+  hadoopConf:
+    "fs.s3a.endpoint": "http://127.0.0.1:9000"
+    "fs.s3a.access.key": "minio"
+    "fs.s3a.secret.key": "minio123"
+    "fs.s3a.path.style.access": "true"
+    "fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
+  type: Scala
+  sparkVersion: 2.4.5
+  mode: cluster
+  image: minio/spark:v2.4.5-hadoop-3.1
+  imagePullPolicy: Always
+  restartPolicy:
+      type: OnFailure
+      onFailureRetries: 3
+      onFailureRetryInterval: 10
+      onSubmissionFailureRetries: 5
+      onSubmissionFailureRetryInterval: 20
 
-When a cache resource is stale, the resource is validated with the backend with a If-None-Match header to check if it is in fact still fresh. If so, the backend returns a 304 (Not Modified) header without sending the body of the requested resource, saving some bandwidth.
+  mainClass: org.apache.spark.examples.JavaWordCount
+  mainApplicationFile: "local:///opt/spark/examples/target/original-spark-examples_2.11-2.4.6-SNAPSHOT.jar"
+  arguments:
+  - "s3a://mytestbucket/mydata"
+  driver:
+    cores: 1
+    coreLimit: "1000m"
+    memory: "512m"
+    labels:
+      version: 2.4.5
+    sidecars:
+    - name: minio-lb
+      image: "minio/sidekick:v0.3.0"
+      imagePullPolicy: Always
+      args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
+      env:
+       - name: SIDEKICK_CACHE_ENDPOINT
+         value: "http://minio-remote:9000"
+       - name: SIDEKICK_CACHE_ACCESS_KEY
+         value: "minio"
+       - name: SIDEKICK_CACHE_SECRET_KEY
+         value: "minio123"
+       - name: SIDEKICK_CACHE_BUCKET
+         value: "cache01"
+       - name: SIDEKICK_CACHE_MIN_SIZE
+         value: "32MiB"
+       - name: SIDEKICK_CACHE_HEALTH_DURATION
+         value: "20"
+      ports:
+        - containerPort: 9000
 
-Sidekick cache honors standard caching policies specified in request and response directives.
+  executor:
+    cores: 1
+    instances: 4
+    memory: "512m"
+    labels:
+      version: 2.4.5
+    sidecars:
+    - name: minio-lb
+      image: "minio/sidekick:v0.3.0"
+      imagePullPolicy: Always
+      args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
+      env:
+       - name: SIDEKICK_CACHE_ENDPOINT
+         value: "https://minio-remote:9000"
+       - name: SIDEKICK_CACHE_ACCESS_KEY
+         value: "minio"
+       - name: SIDEKICK_CACHE_SECRET_KEY
+         value: "minio123"
+       - name: SIDEKICK_CACHE_BUCKET
+         value: "cache01"
+       - name: SIDEKICK_CACHE_MIN_SIZE
+         value: "32MiB"
+       - name: SIDEKICK_CACHE_HEALTH_DURATION
+         value: "20"
+      ports:
+        - containerPort: 9000
+```
 
-Limitations:
-Range GET requests are currently not cached.
+```
+kubectl create -f spark-job.yaml
+kubectl logs -f --namespace spark-operator spark-minio-app-driver spark-kubernetes-driver
+```
+
+#### Features
+- Sidekick cache layer is implemented as a high performance middleware wrapper around the Sidekick load balancer. All GET requests that qualify for caching per the RFC 7234 cache specifications and exceeding minimum configured size are streamed simultaneously to the application and the S3 cache. This allows simple, fast and zero memory overhead caching without affecting performance.
+
+- If an object is already cached to S3 store, the ETag and LastModified date are verified with the backend unless the Cache-Control header explicitly specifies "immutable" or "only-if-cached". Any cached entry that fails the ETag and/or LastModified checks or deleted from the backend is cache evicted automatically.
+
+- When a cache resource is stale, the resource is validated with the backend with a If-None-Match header to check if it is in fact still fresh. If so, the backend returns a 304 (Not Modified) header without sending the body of the requested resource, saving some bandwidth.
+
+- Sidekick cache honors standard HTTP caching policies such as 'Cache-Control', 'Expiry' etc. specified in request and response directives.
+
+- GET requests with Range headers are not cached to keep the codebase simple.
