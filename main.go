@@ -193,23 +193,40 @@ func registerMetricsRouter(router *mux.Router) error {
 	return nil
 }
 
+const (
+	portLowerLimit = 0
+	portUpperLimit = 65535
+)
+
 // getHealthCheckURL - extracts the health check URL.
-func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) string {
-	healthCheckURL, _ := url.Parse(strings.TrimSuffix(endpoint, slashSeparator) + healthCheckPath)
+func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) (string, error) {
+	healthCheckURL, err := url.ParseRequestURI(strings.TrimSuffix(endpoint, slashSeparator) + healthCheckPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid endpoint %q and health check path %q: %s", endpoint, healthCheckPath, err)
+	}
+
 	if healthCheckPort == 0 {
-		return healthCheckURL.String()
+		return healthCheckURL.String(), nil
+	}
+
+	// Validate port range which should be in [0, 65535]
+	if healthCheckPort < portLowerLimit || healthCheckPort > portUpperLimit {
+		return "", fmt.Errorf("invalid health check port \"%d\": must be in [0, 65535]", healthCheckPort)
 	}
 
 	// Set health check port
-	host, _, _ := net.SplitHostPort(healthCheckURL.Host)
-	healthCheckURL.Host = net.JoinHostPort(host, strconv.Itoa(healthCheckPort))
+	healthCheckURL.Host = net.JoinHostPort(healthCheckURL.Hostname(), strconv.Itoa(healthCheckPort))
 
-	return healthCheckURL.String()
+	return healthCheckURL.String(), nil
 }
 
 // healthCheck - background routine which checks if a backend is up or down.
 func (b *Backend) healthCheck() {
-	healthCheckURL := getHealthCheckURL(b.endpoint, b.healthCheckPath, b.healthCheckPort)
+	healthCheckURL, err := getHealthCheckURL(b.endpoint, b.healthCheckPath, b.healthCheckPort)
+	if err != nil {
+		console.Fatalln(err)
+	}
+
 	for {
 		reqTime := time.Now().UTC()
 		req, err := http.NewRequest(http.MethodGet, healthCheckURL, nil)
