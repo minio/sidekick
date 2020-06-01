@@ -30,6 +30,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -128,6 +129,7 @@ type Backend struct {
 	httpClient          *http.Client
 	up                  int32
 	healthCheckPath     string
+	healthCheckPort     int
 	healthCheckDuration int
 	Stats               *BackendStats
 	DowntimeStart       time.Time
@@ -191,9 +193,40 @@ func registerMetricsRouter(router *mux.Router) error {
 	return nil
 }
 
+const (
+	portLowerLimit = 0
+	portUpperLimit = 65535
+)
+
+// getHealthCheckURL - extracts the health check URL.
+func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) (string, error) {
+	healthCheckURL, err := url.ParseRequestURI(strings.TrimSuffix(endpoint, slashSeparator) + healthCheckPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid endpoint %q and health check path %q: %s", endpoint, healthCheckPath, err)
+	}
+
+	if healthCheckPort == 0 {
+		return healthCheckURL.String(), nil
+	}
+
+	// Validate port range which should be in [0, 65535]
+	if healthCheckPort < portLowerLimit || healthCheckPort > portUpperLimit {
+		return "", fmt.Errorf("invalid health check port \"%d\": must be in [0, 65535]", healthCheckPort)
+	}
+
+	// Set health check port
+	healthCheckURL.Host = net.JoinHostPort(healthCheckURL.Hostname(), strconv.Itoa(healthCheckPort))
+
+	return healthCheckURL.String(), nil
+}
+
 // healthCheck - background routine which checks if a backend is up or down.
 func (b *Backend) healthCheck() {
-	healthCheckURL := strings.TrimSuffix(b.endpoint, slashSeparator) + b.healthCheckPath
+	healthCheckURL, err := getHealthCheckURL(b.endpoint, b.healthCheckPath, b.healthCheckPort)
+	if err != nil {
+		console.Fatalln(err)
+	}
+
 	for {
 		reqTime := time.Now().UTC()
 		req, err := http.NewRequest(http.MethodGet, healthCheckURL, nil)
@@ -485,7 +518,7 @@ func checkMain(ctx *cli.Context) {
 	}
 }
 
-func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckDuration int) *site {
+func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration int) *site {
 	var endpoints []string
 
 	if ellipses.HasEllipses(siteStrs...) {
@@ -530,7 +563,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 		stats := BackendStats{MinLatency: time.Duration(24 * time.Hour), MaxLatency: time.Duration(0)}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckPath, healthCheckDuration, &stats, timeZero, newCacheClient(ctx, cacheCfg)}
+		}, 0, healthCheckPath, healthCheckPort, healthCheckDuration, &stats, timeZero, newCacheClient(ctx, cacheCfg)}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
@@ -553,6 +586,7 @@ func sidekickMain(ctx *cli.Context) {
 	log.SetReportCaller(true)
 
 	healthCheckPath := ctx.GlobalString("health-path")
+	healthCheckPort := ctx.GlobalInt("health-port")
 	healthCheckDuration := ctx.GlobalInt("health-duration")
 	addr := ctx.GlobalString("address")
 	globalLoggingEnabled = ctx.GlobalBool("log")
@@ -568,7 +602,7 @@ func sidekickMain(ctx *cli.Context) {
 
 	var sites []*site
 	for i, siteStrs := range ctx.Args() {
-		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckDuration)
+		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration)
 		sites = append(sites, site)
 	}
 	m := &multisite{sites}
@@ -605,6 +639,10 @@ func main() {
 		cli.StringFlag{
 			Name:  "health-path, p",
 			Usage: "health check path",
+		},
+		cli.IntFlag{
+			Name:  "health-port",
+			Usage: "health check port",
 		},
 		cli.IntFlag{
 			Name:  "health-duration, d",
