@@ -686,7 +686,7 @@ FLAGS:
   {{end}}
 
 SITE:
-Each SITE is a comma separated list of zones of that site: http://172.17.0.{2..5},http://172.17.0.{6..9}
+Each SITE is a comma separated list of zones of that site: http://172.17.0.{2...5},http://172.17.0.{6...9}
 If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
 
 VERSION:
