@@ -627,8 +627,8 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "sidekick"
 	app.Author = "MinIO, Inc."
-	app.Description = `sidekick is a high-performance sidecar load-balancer`
-	app.UsageText = "sidekick [options] ENDPOINTs..."
+	app.Description = `High-Performance sidecar load-balancer`
+	app.UsageText = "[FLAGS] SITE1 [SITE2..]"
 	app.Version = Version
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
@@ -675,22 +675,19 @@ func main() {
 			Usage: "output verbose trace",
 		},
 	}
-	app.CustomAppHelpTemplate = `DESCRIPTION:
-  {{.Description}}
+	app.CustomAppHelpTemplate = `NAME:
+  {{.Name}} - {{.Description}}
 
 USAGE:
-  sidekick [FLAGS] SITE1 [SITE2..]
+  {{.Name}} - {{.UsageText}
 
 FLAGS:
   {{range .VisibleFlags}}{{.}}
   {{end}}
 
 SITE:
-Each SITE is a comma separated list of zones of that site: http://172.17.0.{2...5},http://172.17.0.{6...9}
-If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
-
-VERSION:
-  {{.Version}}
+  Each SITE is a comma separated list of zones of that site: http://172.17.0.{2...5},http://172.17.0.{6...9}.
+  If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
 
 EXAMPLES:
   1. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
@@ -703,8 +700,8 @@ EXAMPLES:
      $ sidekick --health-path "/minio/health/ready" --insecure https://minio{1...4}:9000
 
   4. Two sites, each site having two zones, each zone having 4 servers:
-     $ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
-
+     $ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 \
+               http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
 `
 	app.Action = sidekickMain
 	app.Run(os.Args)
