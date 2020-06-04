@@ -40,6 +40,7 @@ import (
 	"github.com/minio/cli"
 	"github.com/minio/minio/pkg/console"
 	"github.com/minio/minio/pkg/ellipses"
+	"github.com/minio/sidekick/pkg"
 	"github.com/sirupsen/logrus"
 )
 
@@ -327,6 +328,7 @@ type multisite struct {
 }
 
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Server", "sidekick/"+pkg.ReleaseTag) // indicate sidekick serving the request
 	for _, s := range m.sites {
 		if s.IsUp() {
 			s.ServeHTTP(w, r)
@@ -629,7 +631,9 @@ func main() {
 	app.Author = "MinIO, Inc."
 	app.Description = `High-Performance sidecar load-balancer`
 	app.UsageText = "[FLAGS] SITE1 [SITE2..]"
-	app.Version = Version
+	app.Version = pkg.Version + " - " + pkg.ShortCommitID
+	app.Copyright = "(c) 2020 MinIO, Inc."
+	app.Compiled, _ = time.Parse(time.RFC3339, pkg.ReleaseTime)
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "address, a",
@@ -657,7 +661,6 @@ func main() {
 			Name:  "log, l",
 			Usage: "enable logging",
 		},
-
 		cli.BoolFlag{
 			Name:  "trace, t",
 			Usage: "enable request tracing",

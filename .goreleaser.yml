@@ -22,7 +22,7 @@ builds:
       - -tags=kqueue
       - -trimpath
     ldflags:
-      - -s -w -X github.com/minio/sidekick.ReleaseTag={{.Tag}} -X github.com/minio/sidekick.CommitID={{.FullCommit}} -X github.com/minio/sidekick.Version={{.Version}} -X github.com/minio/sidekick.ShortCommitID={{.ShortCommit}} -X github.com/minio/sidekick.ReleaseTime={{.Date}}
+      - -s -w -X github.com/minio/sidekick/pkg.ReleaseTag={{.Tag}} -X github.com/minio/sidekick/pkg.CommitID={{.FullCommit}} -X github.com/minio/sidekick/pkg.Version={{.Version}} -X github.com/minio/sidekick/pkg.ShortCommitID={{.ShortCommit}} -X github.com/minio/sidekick/pkg.ReleaseTime={{.Date}}
 archives:
   -
     replacements:
