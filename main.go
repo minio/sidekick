@@ -42,6 +42,7 @@ import (
 	"github.com/minio/minio/pkg/ellipses"
 	"github.com/minio/sidekick/pkg"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 const slashSeparator = "/"
@@ -595,7 +596,7 @@ func sidekickMain(ctx *cli.Context) {
 	globalTraceEnabled = ctx.GlobalBool("trace")
 	globalJSONEnabled = ctx.GlobalBool("json")
 	globalQuietEnabled = ctx.GlobalBool("quiet")
-	globalConsoleDisplay = globalLoggingEnabled || globalTraceEnabled
+	globalConsoleDisplay = globalLoggingEnabled || globalTraceEnabled || !terminal.IsTerminal(int(os.Stdout.Fd()))
 	globalDebugEnabled = ctx.GlobalBool("debug")
 
 	if !strings.HasPrefix(healthCheckPath, slashSeparator) {
