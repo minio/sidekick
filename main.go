@@ -683,7 +683,7 @@ func main() {
   {{.Name}} - {{.Description}}
 
 USAGE:
-  {{.Name}} - {{.UsageText}
+  {{.Name}} - {{.UsageText}}
 
 FLAGS:
   {{range .VisibleFlags}}{{.}}
