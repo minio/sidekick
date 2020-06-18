@@ -15,4 +15,5 @@ require (
 	github.com/sirupsen/logrus v1.5.0
 	github.com/stretchr/testify v1.4.0 // indirect
 	go.uber.org/atomic v1.4.0
+	golang.org/x/crypto v0.0.0-20191117063200-497ca9f6d64f
 )
