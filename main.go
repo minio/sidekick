@@ -329,7 +329,7 @@ type multisite struct {
 }
 
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Server", "sidekick/"+pkg.ReleaseTag) // indicate sidekick serving the request
+	w.Header().Set("Server", os.Args[0]+pkg.ReleaseTag) // indicate sidekick is serving the request
 	for _, s := range m.sites {
 		if s.IsUp() {
 			s.ServeHTTP(w, r)
@@ -340,8 +340,7 @@ func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type site struct {
-	backends  []*Backend
-	listIndex int // List happens on the same backend always as S3 list is stateful for MinIO.
+	backends []*Backend
 }
 
 func (s *site) IsUp() bool {
@@ -371,53 +370,13 @@ func (s *site) nextProxy() *Backend {
 	}
 
 	idx := rng.Intn(len(backends))
-	// random backend from a list of up backends.
+	// random backend from a list of available backends.
 	return backends[idx]
-}
-
-// Returns the next backend the request should go to.
-func (s *site) listProxy() *Backend {
-	tries := 0
-	listIndex := s.listIndex
-	for {
-		var backend *Backend
-		if s.backends[listIndex].IsUp() {
-			backend = s.backends[listIndex]
-		}
-		listIndex++
-		if listIndex == len(s.backends) {
-			listIndex = 0
-		}
-		if backend != nil {
-			return backend
-		}
-		tries++
-		if tries == len(s.backends) {
-			break
-		}
-	}
-	return nil
-}
-
-func trimPrefixSuffixSlash(p string) string {
-	p = strings.TrimPrefix(p, slashSeparator)
-	p = strings.TrimSuffix(p, slashSeparator)
-	return p
 }
 
 // ServeHTTP - LoadBalancer implements http.Handler
 func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p := r.URL.Path
-	p = trimPrefixSuffixSlash(p)
-
-	var backend *Backend
-	if strings.Contains(p, "/") {
-		// Object calls get distributed across the backends.
-		backend = s.nextProxy()
-	} else {
-		// Bucket calls always go to the same backend (to accommodate ListObjects which is stateful).
-		backend = s.listProxy()
-	}
+	backend := s.nextProxy()
 	if backend == nil {
 		w.WriteHeader(http.StatusBadGateway)
 		return
@@ -574,8 +533,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 	}
 
 	return &site{
-		backends:  backends,
-		listIndex: rng.Intn(len(backends)),
+		backends: backends,
 	}
 }
 
@@ -608,18 +566,19 @@ func sidekickMain(ctx *cli.Context) {
 		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration)
 		sites = append(sites, site)
 	}
-	m := &multisite{sites}
 
+	m := &multisite{sites}
 	initUI(m)
+
 	if globalConsoleDisplay {
-		console.Infoln("Listening on", addr)
+		console.Infof("listening on '%s'\n", addr)
 	}
 
 	router := mux.NewRouter().SkipClean(true).UseEncodedPath()
 	if err := registerMetricsRouter(router); err != nil {
 		console.Fatalln(err)
 	}
-	router.PathPrefix("/").Handler(m)
+	router.PathPrefix(slashSeparator).Handler(m)
 	if err := http.ListenAndServe(addr, router); err != nil {
 		console.Fatalln(err)
 	}
@@ -628,7 +587,7 @@ func sidekickMain(ctx *cli.Context) {
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "sidekick"
+	app.Name = os.Args[0]
 	app.Author = "MinIO, Inc."
 	app.Description = `High-Performance sidecar load-balancer`
 	app.UsageText = "[FLAGS] SITE1 [SITE2..]"
@@ -688,23 +647,22 @@ USAGE:
 FLAGS:
   {{range .VisibleFlags}}{{.}}
   {{end}}
-
 SITE:
   Each SITE is a comma separated list of zones of that site: http://172.17.0.{2...5},http://172.17.0.{6...9}.
   If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
 
 EXAMPLES:
   1. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
-     $ sidekick --health-path "/minio/health/ready" http://minio{1...4}:9000
+     $ sidekick --health-path "/minio/health/cluster" http://minio{1...4}:9000
 
   2. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), listen on port 8000
-     $ sidekick --health-path "/minio/health/ready" --address ":8000" http://minio{1...4}:9000
+     $ sidekick --health-path "/minio/health/cluster" --address ":8000" http://minio{1...4}:9000
 
   3. Load balance across 4 MinIO Servers using HTTPS and disable TLS certificate validation
-     $ sidekick --health-path "/minio/health/ready" --insecure https://minio{1...4}:9000
+     $ sidekick --health-path "/minio/health/cluster" --insecure https://minio{1...4}:9000
 
   4. Two sites, each site having two zones, each zone having 4 servers:
-     $ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 \
+     $ sidekick --health-path=/minio/health/cluster http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 \
                http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
 `
 	app.Action = sidekickMain
