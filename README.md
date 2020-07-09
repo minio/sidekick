@@ -54,22 +54,22 @@ If all servers in SITE1 are down, then the traffic is routed to the next site - 
 
 ## Examples
 
-- Load balance across a web service using DNS provided IPs.
+### Load balance across a web service using DNS provided IPs
 ```
 $ sidekick --health-path=/ready http://myapp.myorg.dom
 ```
 
-- Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
+### Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
 ```
 $ sidekick --health-path=/minio/health/ready --address :8000 http://minio{1...4}:9000
 ```
 
-- Two sites, each site having two zones, each zone having 4 servers:
+### Two sites with 4 servers each
 ```
-$ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
+$ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000 http://site2-minio{1...4}:9000
 ```
-Note that the two sites are separated by space character.
-If all the servers in site-1 are down, then sidekick will failover to site-2.
+
+Note that the two sites are separated by space character. If all the servers in site-1 are down, then sidekick will failover to site-2.
 
 ## Realworld Example with spark-orchestrator
 
