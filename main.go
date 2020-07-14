@@ -403,6 +403,47 @@ func mustGetSystemCertPool() *x509.CertPool {
 	return pool
 }
 
+// getCertPool - return system CAs or load CA from file if flag specified
+func getCertPool(cacert string) *x509.CertPool {
+	if cacert == "" {
+		return mustGetSystemCertPool()
+	}
+
+	pool := x509.NewCertPool()
+	caPEM, err := ioutil.ReadFile(cacert)
+	if err != nil {
+		console.Fatalln(fmt.Errorf("unable to load CA certificate: %s", err))
+	}
+	ok := pool.AppendCertsFromPEM([]byte(caPEM))
+	if !ok {
+		console.Fatalln(fmt.Errorf("unable to load CA certificate: %s is not valid certificate", cacert))
+	}
+	return pool
+}
+
+// getCertKeyPair - load client certificate and key pair from file if specified
+func getCertKeyPair(cert, key string) []tls.Certificate {
+	if cert == "" && key == "" {
+		return nil
+	}
+	if cert == "" || key == "" {
+		console.Fatalln(fmt.Errorf("both --cert and --key flags must be specified"))
+	}
+	certPEM, err := ioutil.ReadFile(cert)
+	if err != nil {
+		console.Fatalln(fmt.Errorf("unable to load certificate: %s", err))
+	}
+	keyPEM, err := ioutil.ReadFile(key)
+	if err != nil {
+		console.Fatalln(fmt.Errorf("unable to load key: %s", err))
+	}
+	keyPair, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+	if err != nil {
+		console.Fatalln(fmt.Errorf("%s", err))
+	}
+	return []tls.Certificate{keyPair}
+}
+
 var rng = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
 
 type dialContext func(ctx context.Context, network, address string) (net.Conn, error)
@@ -453,13 +494,14 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	if enableTLS {
 		// Keep TLS config.
 		tr.TLSClientConfig = &tls.Config{
-			RootCAs: mustGetSystemCertPool(),
+			RootCAs:            getCertPool(ctx.GlobalString("cacert")),
+			Certificates:       getCertKeyPair(ctx.GlobalString("cert"), ctx.GlobalString("key")),
+			InsecureSkipVerify: ctx.GlobalBool("insecure"),
 			// Can't use SSLv3 because of POODLE and BEAST
 			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
 			// Can't use TLSv1.1 because of RC4 cipher usage
-			MinVersion:         tls.VersionTLS12,
-			NextProtos:         []string{"http/1.1"},
-			InsecureSkipVerify: ctx.GlobalBool("insecure"),
+			MinVersion: tls.VersionTLS12,
+			NextProtos: []string{"http/1.1"},
 		}
 
 		// Because we create a custom TLSClientConfig, we have to opt-in to HTTP/2.
@@ -636,6 +678,18 @@ func main() {
 		cli.BoolFlag{
 			Name:  "debug",
 			Usage: "output verbose trace",
+		},
+		cli.StringFlag{
+			Name:  "cacert",
+			Usage: "CA certificate to verify peer against",
+		},
+		cli.StringFlag{
+			Name:  "cert",
+			Usage: "client certificate file",
+		},
+		cli.StringFlag{
+			Name:  "key",
+			Usage: "client private key file",
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
