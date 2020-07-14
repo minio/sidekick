@@ -326,9 +326,13 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 
 type multisite struct {
 	sites []*site
+	host  string
 }
 
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if m.host != "" {
+		r.Host = m.host
+	}
 	w.Header().Set("Server", os.Args[0]+pkg.ReleaseTag) // indicate sidekick is serving the request
 	for _, s := range m.sites {
 		if s.IsUp() {
@@ -522,7 +526,7 @@ func checkMain(ctx *cli.Context) {
 	}
 }
 
-func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration int) *site {
+func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration int, host string) *site {
 	var endpoints []string
 
 	if ellipses.HasEllipses(siteStrs...) {
@@ -591,6 +595,7 @@ func sidekickMain(ctx *cli.Context) {
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthCheckPort := ctx.GlobalInt("health-port")
 	healthCheckDuration := ctx.GlobalInt("health-duration")
+	host := ctx.GlobalString("host")
 	addr := ctx.GlobalString("address")
 	globalLoggingEnabled = ctx.GlobalBool("log")
 	globalTraceEnabled = ctx.GlobalBool("trace")
@@ -605,11 +610,11 @@ func sidekickMain(ctx *cli.Context) {
 
 	var sites []*site
 	for i, siteStrs := range ctx.Args() {
-		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration)
+		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration, host)
 		sites = append(sites, site)
 	}
 
-	m := &multisite{sites}
+	m := &multisite{sites: sites, host: host}
 	initUI(m)
 
 	if globalConsoleDisplay {
@@ -690,6 +695,10 @@ func main() {
 		cli.StringFlag{
 			Name:  "key",
 			Usage: "client private key file",
+		},
+		cli.StringFlag{
+			Name:  "host",
+			Usage: "override host for the requests",
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
