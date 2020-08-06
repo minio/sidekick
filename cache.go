@@ -36,8 +36,8 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/minio/cli"
-	minio "github.com/minio/minio-go/v6"
-	"github.com/minio/minio-go/v6/pkg/credentials"
+	minio "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	xhttp "github.com/minio/minio/cmd/http"
 	"github.com/minio/minio/cmd/logger"
 	"github.com/minio/minio/pkg/console"
@@ -560,7 +560,7 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 		for k, v := range r.Header {
 			opts.Set(k, strings.Join(v, ""))
 		}
-		reader, oi, _, cacheErr := clnt.GetObject(clnt.bucket, key, opts)
+		reader, oi, _, cacheErr := clnt.GetObject(r.Context(), clnt.bucket, key, opts)
 		cacheHdrs := getCacheResponseHeaders(oi)
 		cc := parseCacheControlHeaders(cacheHdrs.Header)
 		reqCC := parseCacheControlHeaders(r.Header)
@@ -633,7 +633,7 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 					}
 				} else if statusCode != http.StatusOK {
 					go func() {
-						clnt.RemoveObject(clnt.bucket, key)
+						clnt.RemoveObject(r.Context(), clnt.bucket, key, minio.RemoveObjectOptions{})
 					}()
 					// write backend response and return
 				}
@@ -672,7 +672,7 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 			if respCC.neverCache() || resultContentLength < clnt.minSize {
 				if cacheErr == nil {
 					go func() {
-						clnt.RemoveObject(clnt.bucket, key)
+						clnt.RemoveObject(r.Context(), clnt.bucket, key, minio.RemoveObjectOptions{})
 					}()
 				}
 				mustCache = false
@@ -682,7 +682,7 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 				// Avoid caching range GET's for now.
 				if cacheErr == nil {
 					go func() {
-						clnt.RemoveObject(clnt.bucket, key)
+						clnt.RemoveObject(r.Context(), clnt.bucket, key, minio.RemoveObjectOptions{})
 					}()
 				}
 				mustCache = false
@@ -698,9 +698,11 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 			pipeReader, pipeWriter := io.Pipe()
 			mw := cacheMultiWriter(w, pipeWriter)
 			go func() {
-				_, err := clnt.PutObject(clnt.bucket, key,
+				_, err := clnt.PutObject(r.Context(), clnt.bucket, key,
 					io.LimitReader(pipeReader, resultContentLength), resultContentLength,
-					"", "", getPutMetadata(result.Header), nil)
+					"", "", minio.PutObjectOptions{
+						UserMetadata: getPutMetadata(result.Header),
+					})
 				if err != nil {
 					clnt.setOffline()
 					logger.LogIf(context.Background(), err, "Failed to cache object")
@@ -765,88 +767,81 @@ func newCacheClient(ctx *cli.Context, cfg *cacheConfig) *S3CacheClient {
 	if cfg == nil {
 		return nil
 	}
-	creds := credentials.NewStaticV4(cfg.accessKey, cfg.secretKey, "")
-	var e error
+
 	s3Clnt := &S3CacheClient{}
 	options := minio.Options{
-		Creds:        creds,
-		Secure:       cfg.useTLS,
+		Creds:  credentials.NewStaticV4(cfg.accessKey, cfg.secretKey, ""),
+		Secure: cfg.useTLS,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			MaxIdleConns:          256,
+			MaxIdleConnsPerHost:   16,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 10 * time.Second,
+			TLSClientConfig: &tls.Config{
+				RootCAs: mustGetSystemCertPool(),
+				// Can't use SSLv3 because of POODLE and BEAST
+				// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
+				// Can't use TLSv1.1 because of RC4 cipher usage
+				MinVersion:         tls.VersionTLS12,
+				NextProtos:         []string{"http/1.1"},
+				InsecureSkipVerify: ctx.GlobalBool("insecure"),
+			},
+			// Set this value so that the underlying transport round-tripper
+			// doesn't try to auto decode the body of objects with
+			// content-encoding set to `gzip`.
+			//
+			// Refer:
+			//    https://golang.org/src/net/http/transport.go?h=roundTrip#L1843
+			DisableCompression: true,
+		},
 		Region:       "",
 		BucketLookup: 0,
 	}
-	u, err := url.Parse(cfg.endpoint)
-	if err != nil {
-		return nil
-	}
-	api, e := minio.NewWithOptions(u.Host, &options)
-	if e != nil {
-		return nil
-	}
-	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		MaxIdleConns:          256,
-		MaxIdleConnsPerHost:   16,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 10 * time.Second,
-		// Set this value so that the underlying transport round-tripper
-		// doesn't try to auto decode the body of objects with
-		// content-encoding set to `gzip`.
-		//
-		// Refer:
-		//    https://golang.org/src/net/http/transport.go?h=roundTrip#L1843
-		DisableCompression: true,
-	}
-
-	if cfg.useTLS {
-		// Keep TLS config.
-		tlsConfig := &tls.Config{
-			RootCAs: mustGetSystemCertPool(),
-			// Can't use SSLv3 because of POODLE and BEAST
-			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
-			// Can't use TLSv1.1 because of RC4 cipher usage
-			MinVersion:         tls.VersionTLS12,
-			NextProtos:         []string{"http/1.1"},
-			InsecureSkipVerify: ctx.GlobalBool("insecure"),
-		}
-		tr.TLSClientConfig = tlsConfig
-	}
-
-	var transport http.RoundTripper = tr
-	// Set the new transport.
-	api.SetCustomTransport(transport)
-	// Set app info.
-	api.SetAppInfo(ctx.App.Name, ctx.App.Version)
-	// Store the new api object.
-	s3Clnt.Core = &minio.Core{Client: api}
-	cfg.endpoint = strings.TrimSuffix(cfg.endpoint, slashSeparator)
 
 	target, err := url.Parse(cfg.endpoint)
 	if err != nil {
 		console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", cfg.endpoint, err))
 	}
+
+	api, err := minio.New(target.Host, &options)
+	if err != nil {
+		console.Fatalln(err)
+	}
+
+	// Set app info.
+	api.SetAppInfo(ctx.App.Name, ctx.App.Version)
+
+	// Store the new api object.
+	s3Clnt.Core = &minio.Core{Client: api}
+	cfg.endpoint = strings.TrimSuffix(cfg.endpoint, slashSeparator)
+
 	if target.Scheme == "" {
 		target.Scheme = "http"
 	}
+
 	if target.Scheme != "http" && target.Scheme != "https" {
 		console.Fatalln("Unexpected scheme %s, should be http or https, please use '%s --help'",
 			cfg.endpoint, ctx.App.Name)
 	}
+
 	if target.Host == "" {
 		console.Fatalln(fmt.Errorf("Missing host address %s, please use '%s --help'",
 			cfg.endpoint, ctx.App.Name))
 	}
+
 	s3Clnt.methods = []string{http.MethodGet, http.MethodHead}
 	s3Clnt.bucket = cfg.bucket
 	s3Clnt.minSize = int64(cfg.minSize)
 	s3Clnt.healthCheckDuration = cfg.duration
 	s3Clnt.endpoint = cfg.endpoint
 	s3Clnt.useTLS = target.Scheme == "https"
-	s3Clnt.httpClient = &http.Client{Transport: tr}
+	s3Clnt.httpClient = &http.Client{Transport: options.Transport}
 	go s3Clnt.healthCheck()
 	return s3Clnt
 }
