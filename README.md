@@ -66,10 +66,8 @@ $ sidekick --health-path=/minio/health/ready --address :8000 http://minio{1...4}
 
 ### Two sites with 4 servers each
 ```
-$ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000 http://site2-minio{1...4}:9000
+$ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000,http://site2-minio{1...4}:9000
 ```
-
-Note that the two sites are separated by space character. If all the servers in site-1 are down, then sidekick will failover to site-2.
 
 ## Realworld Example with spark-orchestrator
 
