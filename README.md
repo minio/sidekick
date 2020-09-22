@@ -67,7 +67,7 @@ $ sidekick --health-path=/minio/health/ready --address :8000 http://minio{1...4}
 
 ### Two sites with 4 servers each
 ```
-$ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000,http://site2-minio{1...4}:9000
+$ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000 http://site2-minio{1...4}:9000
 ```
 
 ## Realworld Example with spark-orchestrator
