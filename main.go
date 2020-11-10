@@ -16,7 +16,6 @@
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -38,11 +37,14 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/minio/cli"
+	xhttp "github.com/minio/minio/cmd/http"
+	"github.com/minio/minio/cmd/rest"
 	"github.com/minio/minio/pkg/console"
 	"github.com/minio/minio/pkg/ellipses"
 	"github.com/minio/sidekick/pkg"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/net/http2"
 )
 
 const slashSeparator = "/"
@@ -55,7 +57,10 @@ var (
 	globalJSONEnabled    bool
 	globalConsoleDisplay bool
 	globalConnStats      []*ConnStats
-	timeZero             = time.Time{}
+	globalDNSCache       *xhttp.DNSCache
+	rng                  *rand.Rand
+
+	timeZero = time.Time{}
 
 	// Create a new instance of the logger. You can have any number of instances.
 	log = logrus.New()
@@ -64,6 +69,11 @@ var (
 const (
 	prometheusMetricsPath = "/.prometheus/metrics"
 )
+
+func init() {
+	globalDNSCache = xhttp.NewDNSCache(3*time.Second, 10*time.Second)
+	rng = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
+}
 
 func logMsg(msg logMessage) error {
 	if globalQuietEnabled {
@@ -444,45 +454,15 @@ func getCertKeyPair(cert, key string) []tls.Certificate {
 	return []tls.Certificate{keyPair}
 }
 
-var rng = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
-
-type dialContext func(ctx context.Context, network, address string) (net.Conn, error)
-
-func newCustomDialContext(dialTimeout, dialKeepAlive time.Duration) dialContext {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		dialer := &net.Dialer{
-			Timeout:   dialTimeout,
-			KeepAlive: dialKeepAlive,
-		}
-
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-
-		addrs, err := net.LookupHost(host)
-		if err != nil {
-			addrs = []string{host}
-		}
-
-		for i := range addrs {
-			addrs[i] = net.JoinHostPort(addrs[i], port)
-		}
-
-		return dialer.DialContext(ctx, network, addrs[rng.Intn(len(addrs))])
-	}
-}
-
 func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           newCustomDialContext(5*time.Second, 5*time.Second),
-		MaxIdleConns:          256,
-		MaxIdleConnsPerHost:   16,
-		MaxConnsPerHost:       256,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   30 * time.Second,
-		ExpectContinueTimeout: 30 * time.Second,
+		DialContext:           xhttp.DialContextWithDNSCache(globalDNSCache, xhttp.NewInternodeDialContext(rest.DefaultTimeout)),
+		MaxIdleConnsPerHost:   1024,
+		IdleConnTimeout:       15 * time.Second,
+		ResponseHeaderTimeout: 3 * time.Minute, // Set conservative timeouts for MinIO internode.
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 15 * time.Second,
 		// Set this value so that the underlying transport round-tripper
 		// doesn't try to auto decode the body of objects with
 		// content-encoding set to `gzip`.
@@ -491,28 +471,24 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 		//    https://golang.org/src/net/http/transport.go?h=roundTrip#L1843
 		DisableCompression: true,
 	}
+
 	if enableTLS {
 		// Keep TLS config.
 		tr.TLSClientConfig = &tls.Config{
 			RootCAs:            getCertPool(ctx.GlobalString("cacert")),
-			Certificates:       getCertKeyPair(ctx.GlobalString("cert"), ctx.GlobalString("key")),
+			Certificates:       getCertKeyPair(ctx.GlobalString("client-cert"), ctx.GlobalString("client-key")),
 			InsecureSkipVerify: ctx.GlobalBool("insecure"),
 			// Can't use SSLv3 because of POODLE and BEAST
 			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
 			// Can't use TLSv1.1 because of RC4 cipher usage
 			MinVersion: tls.VersionTLS12,
-			NextProtos: []string{"http/1.1"},
 		}
-
-		// Because we create a custom TLSClientConfig, we have to opt-in to HTTP/2.
-		// See https://github.com/golang/go/issues/14275
-		//
-		// TODO: Enable http2.0 when upstream issues related to HTTP/2 are fixed.
-		//
-		// if e = http2.ConfigureTransport(tr); e != nil {
-		// 	return nil, probe.NewError(e)
-		// }
 	}
+
+	if tr.TLSClientConfig != nil {
+		http2.ConfigureTransport(tr)
+	}
+
 	return tr
 }
 
@@ -545,6 +521,8 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 
 	cacheCfg := newCacheConfig()
 	var backends []*Backend
+	var prevScheme string
+	var transport http.RoundTripper
 	for _, endpoint := range endpoints {
 		endpoint = strings.TrimSuffix(endpoint, slashSeparator)
 		target, err := url.Parse(endpoint)
@@ -562,8 +540,18 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 			console.Fatalln(fmt.Errorf("Missing host address %s, please use '%s --help'",
 				endpoint, ctx.App.Name))
 		}
+		if prevScheme == "" {
+			prevScheme = target.Scheme
+		}
+		if prevScheme != target.Scheme {
+			console.Fatalln(fmt.Errorf("Unexpected scheme %s, please use 'http' or 'http's for all backend endpoints '%s --help'",
+				endpoint, ctx.App.Name))
+		}
+		if transport == nil {
+			transport = clientTransport(ctx, target.Scheme == "https")
+		}
 		proxy := httputil.NewSingleHostReverseProxy(target)
-		proxy.Transport = clientTransport(ctx, target.Scheme == "https")
+		proxy.Transport = transport
 		stats := BackendStats{MinLatency: time.Duration(24 * time.Hour), MaxLatency: time.Duration(0)}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
@@ -580,6 +568,8 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 }
 
 func sidekickMain(ctx *cli.Context) {
+	defer globalDNSCache.Stop()
+
 	checkMain(ctx)
 
 	log.SetFormatter(&logrus.TextFormatter{
@@ -621,10 +611,15 @@ func sidekickMain(ctx *cli.Context) {
 		console.Fatalln(err)
 	}
 	router.PathPrefix(slashSeparator).Handler(m)
-	if err := http.ListenAndServe(addr, router); err != nil {
-		console.Fatalln(err)
+	if ctx.String("cert") != "" && ctx.String("key") != "" {
+		if err := http.ListenAndServeTLS(addr, ctx.String("cert"), ctx.String("key"), router); err != nil {
+			console.Fatalln(err)
+		}
+	} else {
+		if err := http.ListenAndServe(addr, router); err != nil {
+			console.Fatalln(err)
+		}
 	}
-
 }
 
 func main() {
@@ -684,12 +679,20 @@ func main() {
 			Usage: "CA certificate to verify peer against",
 		},
 		cli.StringFlag{
-			Name:  "cert",
+			Name:  "client-cert",
 			Usage: "client certificate file",
 		},
 		cli.StringFlag{
-			Name:  "key",
+			Name:  "client-key",
 			Usage: "client private key file",
+		},
+		cli.StringFlag{
+			Name:  "cert",
+			Usage: "server certificate file",
+		},
+		cli.StringFlag{
+			Name:  "key",
+			Usage: "server private key file",
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
@@ -718,6 +721,9 @@ EXAMPLES:
   4. Two sites, each site having two zones, each zone having 4 servers:
      $ sidekick --health-path=/minio/health/cluster http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 \
                http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
+
+  5. Sidekick as TLS terminator:
+     $ sidekick --cert public.crt --key private.key --health-path=/minio/health/cluster http://site1-minio{1...4}:9000
 `
 	app.Action = sidekickMain
 	app.Run(os.Args)
