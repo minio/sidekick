@@ -475,13 +475,15 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	if enableTLS {
 		// Keep TLS config.
 		tr.TLSClientConfig = &tls.Config{
+			NextProtos:         []string{"h2", "http/1.1"},
 			RootCAs:            getCertPool(ctx.GlobalString("cacert")),
 			Certificates:       getCertKeyPair(ctx.GlobalString("client-cert"), ctx.GlobalString("client-key")),
 			InsecureSkipVerify: ctx.GlobalBool("insecure"),
 			// Can't use SSLv3 because of POODLE and BEAST
 			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
 			// Can't use TLSv1.1 because of RC4 cipher usage
-			MinVersion: tls.VersionTLS12,
+			MinVersion:               tls.VersionTLS12,
+			PreferServerCipherSuites: true,
 		}
 	}
 
@@ -550,8 +552,22 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 		if transport == nil {
 			transport = clientTransport(ctx, target.Scheme == "https")
 		}
-		proxy := httputil.NewSingleHostReverseProxy(target)
-		proxy.Transport = transport
+
+		proxy := &httputil.ReverseProxy{
+			Director: func(r *http.Request) {
+				r.Header.Add("X-Forwarded-Host", r.Host)
+				r.Header.Add("X-Real-IP", r.RemoteAddr)
+
+				if target.Scheme == "https" {
+					r.URL.Scheme = "https"
+				} else {
+					r.URL.Scheme = "http"
+				}
+				r.URL.Host = target.Host
+			},
+			Transport: transport,
+		}
+
 		stats := BackendStats{MinLatency: time.Duration(24 * time.Hour), MaxLatency: time.Duration(0)}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
