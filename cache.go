@@ -152,7 +152,7 @@ func parseCacheControlHeaders(header http.Header) *cacheControl {
 		}
 	}
 	cc, ok := header[CacheControl]
-	if !ok && c.expires.Equal(timeZero) {
+	if !ok && c.expires.IsZero() {
 		return nil
 	}
 	v := strings.Join(cc, "")
@@ -262,7 +262,7 @@ func (c *cacheControl) isStale(modTime time.Time) bool {
 		return true
 	}
 
-	if !c.expires.Equal(timeZero) && c.expires.Before(time.Now().Add(time.Duration(c.maxStale))) {
+	if !c.expires.IsZero() && c.expires.Before(time.Now().Add(time.Duration(c.maxStale))) {
 		return true
 	}
 
@@ -338,7 +338,7 @@ func (c cacheHeader) Expires() time.Time {
 			return t.UTC()
 		}
 	}
-	return timeZero
+	return time.Time{}
 }
 
 //ETag returns ETag from cached response
@@ -353,7 +353,7 @@ func (c cacheHeader) LastModified() time.Time {
 			return t.UTC()
 		}
 	}
-	return timeZero
+	return time.Time{}
 }
 
 const (
