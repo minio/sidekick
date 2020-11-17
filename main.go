@@ -58,12 +58,7 @@ var (
 	globalConsoleDisplay bool
 	globalConnStats      []*ConnStats
 	globalDNSCache       *xhttp.DNSCache
-	rng                  *rand.Rand
-
-	timeZero = time.Time{}
-
-	// Create a new instance of the logger. You can have any number of instances.
-	log = logrus.New()
+	log                  *logrus.Logger
 )
 
 const (
@@ -72,7 +67,9 @@ const (
 
 func init() {
 	globalDNSCache = xhttp.NewDNSCache(3*time.Second, 10*time.Second)
-	rng = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
+
+	// Create a new instance of the logger. You can have any number of instances.
+	log = logrus.New()
 }
 
 func logMsg(msg logMessage) error {
@@ -144,29 +141,32 @@ type Backend struct {
 	healthCheckPort     int
 	healthCheckDuration int
 	Stats               *BackendStats
-	DowntimeStart       time.Time
 	cacheClient         *S3CacheClient
 }
 
+const (
+	offline = iota
+	online
+)
+
 func (b *Backend) setOffline() {
-	atomic.StoreInt32(&b.up, 0)
+	atomic.StoreInt32(&b.up, offline)
 }
 
 func (b *Backend) setOnline() {
-	atomic.StoreInt32(&b.up, 1)
+	atomic.StoreInt32(&b.up, online)
 }
 
-// IsUp returns true if backend is up
-func (b *Backend) IsUp() bool {
-	return atomic.LoadInt32(&b.up) == 1
+// Online returns true if backend is up
+func (b *Backend) Online() bool {
+	return atomic.LoadInt32(&b.up) == online
 }
 
 func (b *Backend) getServerStatus() string {
-	status := "DOWN"
-	if b.IsUp() {
-		status = "UP"
+	if b.Online() {
+		return "UP"
 	}
-	return status
+	return "DOWN"
 }
 
 // BackendStats holds server stats for backend
@@ -259,33 +259,30 @@ func (b *Backend) healthCheck() {
 			resp.Body.Close()
 		}
 		if err != nil || (err == nil && resp.StatusCode != http.StatusOK) {
-			b.httpClient.CloseIdleConnections()
-			if globalLoggingEnabled && (!b.IsUp() || (b.Stats.UpSince.Equal(timeZero))) {
+			if globalLoggingEnabled && (!b.Online() || b.Stats.UpSince.IsZero()) {
 				logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
 			}
-			if b.IsUp() {
-				// observed an error, take the backend down.
-				b.setOffline()
-			}
-			if b.Stats.DowntimeStart.Equal(timeZero) {
+			// observed an error, take the backend down.
+			b.setOffline()
+			if b.Stats.DowntimeStart.IsZero() {
 				b.Stats.DowntimeStart = time.Now().UTC()
 			}
 		} else {
 			var downtimeEnd time.Time
-			if !b.Stats.DowntimeStart.Equal(timeZero) {
+			if !b.Stats.DowntimeStart.IsZero() {
 				now := time.Now().UTC()
 				b.updateDowntime(now.Sub(b.Stats.DowntimeStart))
 				downtimeEnd = now
 			}
-			if globalLoggingEnabled && !b.IsUp() && !b.Stats.UpSince.Equal(timeZero) {
+			if globalLoggingEnabled && !b.Online() && !b.Stats.UpSince.IsZero() {
 				logMsg(logMessage{
 					Endpoint:         b.endpoint,
 					Status:           "up",
 					DowntimeDuration: downtimeEnd.Sub(b.Stats.DowntimeStart),
 				})
 			}
-			b.Stats.UpSince = time.Now()
-			b.Stats.DowntimeStart = timeZero
+			b.Stats.UpSince = time.Now().UTC()
+			b.Stats.DowntimeStart = time.Time{}
 			b.setOnline()
 		}
 		if globalTraceEnabled {
@@ -339,9 +336,9 @@ type multisite struct {
 }
 
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Server", os.Args[0]+pkg.ReleaseTag) // indicate sidekick is serving the request
+	w.Header().Set("Server", "SideKick/"+pkg.ReleaseTag) // indicate sidekick is serving the request
 	for _, s := range m.sites {
-		if s.IsUp() {
+		if s.Online() {
 			s.ServeHTTP(w, r)
 			return
 		}
@@ -353,9 +350,9 @@ type site struct {
 	backends []*Backend
 }
 
-func (s *site) IsUp() bool {
+func (s *site) Online() bool {
 	for _, backend := range s.backends {
-		if backend.IsUp() {
+		if backend.Online() {
 			return true
 		}
 	}
@@ -365,7 +362,7 @@ func (s *site) IsUp() bool {
 func (s *site) upBackends() []*Backend {
 	var backends []*Backend
 	for _, backend := range s.backends {
-		if backend.IsUp() {
+		if backend.Online() {
 			backends = append(backends, backend)
 		}
 	}
@@ -379,7 +376,7 @@ func (s *site) nextProxy() *Backend {
 		return nil
 	}
 
-	idx := rng.Intn(len(backends))
+	idx := rand.Intn(len(backends))
 	// random backend from a list of available backends.
 	return backends[idx]
 }
@@ -387,21 +384,19 @@ func (s *site) nextProxy() *Backend {
 // ServeHTTP - LoadBalancer implements http.Handler
 func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := s.nextProxy()
-	if backend == nil {
-		w.WriteHeader(http.StatusBadGateway)
+	if backend != nil {
+		cacheHandlerFn := func(w http.ResponseWriter, r *http.Request) {
+			if backend.cacheClient != nil {
+				cacheHandler(w, r, backend)(w, r)
+			} else {
+				backend.proxy.ServeHTTP(w, r)
+			}
+		}
+
+		httpTraceHdrs(cacheHandlerFn, w, r, backend)
 		return
 	}
-
-	cacheHandlerFn := func(w http.ResponseWriter, r *http.Request) {
-		if backend.cacheClient != nil {
-			cacheHandler(w, r, backend)(w, r)
-		} else {
-			backend.proxy.ServeHTTP(w, r)
-		}
-	}
-
-	httpTraceHdrs(cacheHandlerFn, w, r, backend)
-
+	w.WriteHeader(http.StatusBadGateway)
 }
 
 // mustGetSystemCertPool - return system CAs or empty pool in case of error (or windows)
@@ -571,7 +566,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 		stats := BackendStats{MinLatency: time.Duration(24 * time.Hour), MaxLatency: time.Duration(0)}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckPath, healthCheckPort, healthCheckDuration, &stats, timeZero, newCacheClient(ctx, cacheCfg)}
+		}, 0, healthCheckPath, healthCheckPort, healthCheckDuration, &stats, newCacheClient(ctx, cacheCfg)}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
@@ -639,6 +634,12 @@ func sidekickMain(ctx *cli.Context) {
 }
 
 func main() {
+	// Set-up rand seed and use global rand to avoid concurrency issues.
+	rand.Seed(time.Now().UTC().UnixNano())
+
+	// Set system resources to maximum.
+	setMaxResources()
+
 	app := cli.NewApp()
 	app.Name = os.Args[0]
 	app.Author = "MinIO, Inc."
