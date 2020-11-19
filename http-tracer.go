@@ -375,7 +375,11 @@ func (s shortTraceMsg) String() string {
 	fmt.Fprintf(b, "[%s] ", statusStr)
 	fmt.Fprintf(b, " %s ", s.Host)
 
-	fmt.Fprintf(b, "%s %s%s", s.Method, s.Path, s.Query)
+	if s.Query != "" {
+		fmt.Fprintf(b, "%s %s?%s", s.Method, s.Path, s.Query)
+	} else {
+		fmt.Fprintf(b, "%s %s", s.Method, s.Path)
+	}
 	fmt.Fprintf(b, " %s ", s.Client)
 	spaces := 15 - len(s.Client)
 	fmt.Fprintf(b, "%*s", spaces, " ")
