@@ -455,7 +455,6 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 		DialContext:           xhttp.DialContextWithDNSCache(globalDNSCache, xhttp.NewInternodeDialContext(rest.DefaultTimeout)),
 		MaxIdleConnsPerHost:   1024,
 		IdleConnTimeout:       15 * time.Second,
-		ResponseHeaderTimeout: 3 * time.Minute, // Set conservative timeouts for MinIO internode.
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: 15 * time.Second,
 		// Set this value so that the underlying transport round-tripper
