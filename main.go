@@ -53,7 +53,7 @@ var (
 	globalQuietEnabled   bool
 	globalDebugEnabled   bool
 	globalLoggingEnabled bool
-	globalTraceEnabled   bool
+	globalTrace          string
 	globalJSONEnabled    bool
 	globalConsoleDisplay bool
 	globalConnStats      []*ConnStats
@@ -285,7 +285,7 @@ func (b *Backend) healthCheck() {
 			b.Stats.DowntimeStart = time.Time{}
 			b.setOnline()
 		}
-		if globalTraceEnabled {
+		if globalTrace == "all" || globalTrace == "minio" {
 			if resp != nil {
 				httpInternalTrace(req, resp, reqTime, respTime, b)
 			}
@@ -593,10 +593,10 @@ func sidekickMain(ctx *cli.Context) {
 	healthCheckDuration := ctx.GlobalInt("health-duration")
 	addr := ctx.GlobalString("address")
 	globalLoggingEnabled = ctx.GlobalBool("log")
-	globalTraceEnabled = ctx.GlobalBool("trace")
+	globalTrace = ctx.GlobalString("trace")
 	globalJSONEnabled = ctx.GlobalBool("json")
 	globalQuietEnabled = ctx.GlobalBool("quiet")
-	globalConsoleDisplay = globalLoggingEnabled || globalTraceEnabled || !terminal.IsTerminal(int(os.Stdout.Fd()))
+	globalConsoleDisplay = globalLoggingEnabled || ctx.IsSet("trace") || !terminal.IsTerminal(int(os.Stdout.Fd()))
 	globalDebugEnabled = ctx.GlobalBool("debug")
 
 	if !strings.HasPrefix(healthCheckPath, slashSeparator) {
@@ -674,9 +674,9 @@ func main() {
 			Name:  "log, l",
 			Usage: "enable logging",
 		},
-		cli.BoolFlag{
+		cli.StringFlag{
 			Name:  "trace, t",
-			Usage: "enable request tracing",
+			Usage: "enable request tracing - valid values are [all,application,minio]",
 		},
 		cli.BoolFlag{
 			Name:  "quiet, q",

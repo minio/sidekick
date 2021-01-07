@@ -305,7 +305,11 @@ func displayTrace(trace TraceInfo, backend *Backend) {
 	st := shortTrace(trace)
 	backend.updateCallStats(st)
 
-	if globalQuietEnabled || !globalTraceEnabled {
+	if globalQuietEnabled || globalTrace == "" {
+		return
+	}
+
+	if globalTrace == "minio" && st.Path != "/minio/health/ready" {
 		return
 	}
 	if globalJSONEnabled {
