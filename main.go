@@ -589,6 +589,7 @@ func sidekickMain(ctx *cli.Context) {
 	log.SetReportCaller(true)
 
 	healthCheckPath := ctx.GlobalString("health-path")
+	healthReadCheckPath := ctx.GlobalString("read-health-path")
 	healthCheckPort := ctx.GlobalInt("health-port")
 	healthCheckDuration := ctx.GlobalInt("health-duration")
 	addr := ctx.GlobalString("address")
@@ -603,8 +604,19 @@ func sidekickMain(ctx *cli.Context) {
 		healthCheckPath = slashSeparator + healthCheckPath
 	}
 
+	if healthReadCheckPath == "" {
+		healthReadCheckPath = healthCheckPath
+	}
+	if !strings.HasPrefix(healthReadCheckPath, slashSeparator) {
+		healthReadCheckPath = slashSeparator + healthReadCheckPath
+	}
+
 	var sites []*site
 	for i, siteStrs := range ctx.Args() {
+		if i == len(ctx.Args())-1 {
+			healthCheckPath = healthReadCheckPath
+		}
+
 		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration)
 		sites = append(sites, site)
 	}
@@ -656,6 +668,10 @@ func main() {
 		cli.StringFlag{
 			Name:  "health-path, p",
 			Usage: "health check path",
+		},
+		cli.StringFlag{
+			Name:  "read-health-path, r",
+			Usage: "health check path for read access - valid only for failover site",
 		},
 		cli.IntFlag{
 			Name:  "health-port",
@@ -738,8 +754,13 @@ EXAMPLES:
      $ sidekick --health-path=/minio/health/cluster http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 \
                http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
 
-  5. Sidekick as TLS terminator:
+  5. Two sites, each site having two zones, each zone having 4 servers. After failover, allow read requests to site2 even if it has just read quorum:
+     $ sidekick --health-path=/minio/health/cluster --read-health-path=/minio/health/cluster/read  http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 \
+               http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
+
+  6. Sidekick as TLS terminator:
      $ sidekick --cert public.crt --key private.key --health-path=/minio/health/cluster http://site1-minio{1...4}:9000
+
 `
 	app.Action = sidekickMain
 	app.Run(os.Args)
