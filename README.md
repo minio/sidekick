@@ -299,3 +299,5 @@ kubectl logs -f --namespace spark-operator spark-minio-app-driver spark-kubernet
 - Sidekick cache honors standard HTTP caching policies such as 'Cache-Control', 'Expiry' etc. specified in request and response directives.
 
 - GET requests with Range headers are not cached to keep the codebase simple.
+
+- Health-Check: Health check is provided at the path "/v1/health". It returns "200 OK" even if any one of the sites is reachable, else it returns "502 Bad Gateway" error.

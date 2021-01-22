@@ -49,6 +49,8 @@ import (
 
 const slashSeparator = "/"
 
+const healthCheckPath = "/v1/health"
+
 var (
 	globalQuietEnabled   bool
 	globalDebugEnabled   bool
@@ -339,6 +341,10 @@ func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Server", "SideKick/"+pkg.ReleaseTag) // indicate sidekick is serving the request
 	for _, s := range m.sites {
 		if s.Online() {
+			if r.URL.Path == healthCheckPath {
+				// Health check endpoint should return success
+				return
+			}
 			s.ServeHTTP(w, r)
 			return
 		}
