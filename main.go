@@ -287,7 +287,7 @@ func (b *Backend) healthCheck() {
 			b.Stats.DowntimeStart = time.Time{}
 			b.setOnline()
 		}
-		if globalTrace == "all" || globalTrace == "minio" {
+		if globalTrace != "application" {
 			if resp != nil {
 				httpInternalTrace(req, resp, reqTime, respTime, b)
 			}
@@ -683,6 +683,7 @@ func main() {
 		cli.StringFlag{
 			Name:  "trace, t",
 			Usage: "enable request tracing - valid values are [all,application,minio]",
+			Value: "all",
 		},
 		cli.BoolFlag{
 			Name:  "quiet, q",
