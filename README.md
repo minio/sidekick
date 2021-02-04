@@ -7,10 +7,16 @@
 <!-- markdown-toc start - Don't edit this section. Run M-x markdown-toc-refresh-toc -->
 **Table of Contents**
 
-- [Download](#download)
 - [Architecture](#architecture)
+- [Install](#install)
+    - [-](#-)
+    - [Docker](#docker)
+    - [Build from source](#build-from-source)
 - [Usage](#usage)
     - [Examples](#examples)
+        - [Load balance across a web service using DNS provided IPs](#load-balance-across-a-web-service-using-dns-provided-ips)
+        - [Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)](#load-balance-across-4-minio-servers-httpminio19000-to-httpminio49000)
+        - [Two sites with 4 servers each](#two-sites-with-4-servers-each)
     - [Realworld Example with spark-orchestrator](#realworld-example-with-spark-orchestrator)
         - [Configure *spark-orchestrator*](#configure-spark-orchestrator)
         - [Install *MinIO*](#install-minio)
@@ -22,13 +28,44 @@
 
 <!-- markdown-toc end -->
 
-# Download
-[Download Binary Releases](https://github.com/minio/sidekick/releases) for various platforms.
-
 # Architecture
 ![architecture](arch_sidekick.png)
 
 **Demo** ![sidekick-demo](sidekick-demo.gif)
+
+# Install
+
+### Binary Releases
+
+| OS      | ARCH    | Binary                                                                                       |
+|:-------:|:-------:|:--------------------------------------------------------------------------------------------:|
+| Linux   | amd64   | [linux-amd64](https://github.com/minio/sidekick/releases/latest/download/sidekick-linux-amd64)         |
+| Linux   | arm64   | [linux-arm64](https://github.com/minio/sidekick/releases/latest/download/sidekick-linux-arm64)         |
+| Linux   | ppc64le | [linux-ppc64le](https://github.com/minio/sidekick/releases/latest/download/sidekick-linux-ppc64le)     |
+| Linux   | s390x   | [linux-s390x](https://github.com/minio/sidekick/releases/latest/download/sidekick-linux-s390x)         |
+| Apple   | amd64   | [darwin-amd64](https://github.com/minio/sidekick/releases/latest/download/sidekick-darwin-amd64)       |
+| Windows | amd64   | [windows-amd64](https://github.com/minio/sidekick/releases/latest/download/sidekick-windows-amd64.exe) |
+
+You can also verify the binary with [minisign](https://jedisct1.github.io/minisign/) by downloading the corresponding [`.minisig`](https://github.com/minio/sidekick/releases/latest) signature file. Then run:
+```
+minisign -Vm sidekick-<OS>-<ARCH> -P RWTx5Zr1tiHQLwG9keckT0c45M3AGeHD6IvimQHpyRywVWGbP1aVSGav
+```
+
+### Docker
+
+Pull the latest release via:
+```
+docker pull minio/sidekick
+```
+
+### Build from source
+
+```
+GO111MODULE=on go get github.com/minio/sidekick/cmd/sidekick
+```
+> You will need a working Go environment. Therefore, please follow [How to install Go](https://golang.org/doc/install).
+> Minimum version required is go1.14
+
 
 # Usage
 
@@ -153,7 +190,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.4.0"
+      image: "minio/sidekick:v0.5.8"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       ports:
@@ -167,7 +204,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.4.0"
+      image: "minio/sidekick:v0.5.8"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       ports:
@@ -237,7 +274,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.4.0"
+      image: "minio/sidekick:v0.5.8"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       env:
@@ -264,7 +301,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "minio/sidekick:v0.4.0"
+      image: "minio/sidekick:v0.5.8"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       env:

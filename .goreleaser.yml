@@ -2,101 +2,125 @@
 # Make sure to check the documentation at http://goreleaser.com
 project_name: sidekick
 
+release:
+   name_template: "Release version {{.Tag}}"
+   github:
+     owner: minio
+     name: sidekick
+   extra_files:
+     - glob: "*.minisig"
+     - glob: "*.zip"
+
 before:
   hooks:
-    # you may remove this if you don't use vgo
     - go mod tidy
+    - go mod download
+
 builds:
   -
     goos:
-      - freebsd
-      - windows
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -tags=kqueue
-      - -trimpath
-
+      - ppc64le
+      - s390x
     ignore:
       - goos: darwin
         goarch: arm64
-      - goos: darwin
-        goarch: arm
-      - goos: darwin
-        goarch: ppc64le
-      - goos: darwin
-        goarch: s390x
       - goos: windows
         goarch: arm64
-      - goos: windows
-        goarch: arm
-      - goos: windows
-        goarch: ppc64le
-      - goos: windows
-        goarch: s390x
-      - goos: freebsd
-        goarch: arm
-      - goos: freebsd
-        goarch: arm64
-      - goos: freebsd
-        goarch: ppc64le
-      - goos: freebsd
-        goarch: s390x
-        
+    env:
+      - CGO_ENABLED=0
+
+    flags:
+      - -trimpath
+      - --tags=kqueue
+
     ldflags:
       - -s -w -X github.com/minio/sidekick/pkg.ReleaseTag={{.Tag}} -X github.com/minio/sidekick/pkg.CommitID={{.FullCommit}} -X github.com/minio/sidekick/pkg.Version={{.Version}} -X github.com/minio/sidekick/pkg.ShortCommitID={{.ShortCommit}} -X github.com/minio/sidekick/pkg.ReleaseTime={{.Date}}
+
 archives:
   -
-    replacements:
-      darwin: Darwin
-      linux: Linux
-      windows: Windows
-      freebsd: FreeBSD
-      amd64: x86_64
-    format_overrides:
-      - goos: windows
-        format: zip
-    files:
-      - README.md
-      - LICENSE
-      - sidekick_logo.png
-checksum:
-  name_template: 'checksums.txt'
-snapshot:
-  name_template: 'snapshot-{{ time "2006-01-02" }}'
-changelog:
-  sort: asc
-  filters:
-    exclude:
-    - '^docs:'
-    - '^test:'
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    format: binary
+
 nfpms:
   -
     vendor: MinIO, Inc.
     homepage: https://github.com/minio/sidekick
-    maintainer: MinIO <minio@minio.io>
-    description: sidekick is a load-balancer run as a sidecar
+    maintainer: MinIO Development <dev@min.io>
+    description: Sidekick is a high-performance sidecar load-balancer
     license: GNU Affero General Public License v3.0
     formats:
       - deb
       - rpm
-    replacements:
-      darwin: Darwin
-      linux: Linux
-      freebsd: FreeBSD
-      amd64: x86_64
-dockers:
+
+signs:
   -
-    # GOOS of the built binary that should be used.
-    goos: linux
-    # GOARCH of the built binary that should be used.
-    goarch: amd64
-    dockerfile: Dockerfile.release
-    image_templates:
-      - "minio/sidekick:{{ .Tag }}"
-      - "minio/sidekick:latest"
+    signature: "${artifact}.minisig"
+    cmd: "sh"
+    args:
+      - '-c'
+      - 'minisign -s /media/${USER}/minio/minisign.key -Sm ${artifact} < /media/${USER}/minio/minisign-passphrase'
+    artifacts: all
+
+snapshot:
+  name_template: v0.0.0@{{.ShortCommit}}
+
+changelog:
+  sort: asc
+
+dockers:
+- image_templates:
+  - "minio/sidekick:{{ .Tag }}-amd64"
+  use_buildx: true
+  dockerfile: Dockerfile.release
+  extra_files:
+    - LICENSE
+    - CREDITS
+  build_flag_templates:
+  - "--platform=linux/amd64"
+- image_templates:
+  - "minio/sidekick:{{ .Tag }}-ppc64le"
+  use_buildx: true
+  dockerfile: Dockerfile.release
+  extra_files:
+    - LICENSE
+    - CREDITS
+  build_flag_templates:
+  - "--platform=linux/ppc64le"
+- image_templates:
+  - "minio/sidekick:{{ .Tag }}-s390x"
+  use_buildx: true
+  dockerfile: Dockerfile.release
+  extra_files:
+    - LICENSE
+    - CREDITS
+  build_flag_templates:
+  - "--platform=linux/s390x"
+- image_templates:
+  - "minio/sidekick:{{ .Tag }}-arm64"
+  use_buildx: true
+  goarch: arm64
+  dockerfile: Dockerfile.release
+  extra_files:
+    - LICENSE
+    - CREDITS
+  build_flag_templates:
+  - "--platform=linux/arm64"
+docker_manifests:
+- name_template: minio/sidekick:{{ .Tag }}
+  image_templates:
+  - minio/sidekick:{{ .Tag }}-amd64
+  - minio/sidekick:{{ .Tag }}-arm64
+  - minio/sidekick:{{ .Tag }}-ppc64le
+  - minio/sidekick:{{ .Tag }}-s390x
+- name_template: minio/sidekick:latest
+  image_templates:
+  - minio/sidekick:{{ .Tag }}-amd64
+  - minio/sidekick:{{ .Tag }}-arm64
+  - minio/sidekick:{{ .Tag }}-ppc64le
+  - minio/sidekick:{{ .Tag }}-s390x
