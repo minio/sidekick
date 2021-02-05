@@ -1,4 +1,4 @@
-![sidekick](sidekick_logo.png)
+![sidekick](https://raw.githubusercontent.com/minio/sidekick/master/sidekick_logo.png)
 
 ![build](https://github.com/minio/sidekick/workflows/Go/badge.svg) ![license](https://img.shields.io/badge/license-AGPL%20V3-blue)
 
@@ -9,7 +9,7 @@
 
 - [Architecture](#architecture)
 - [Install](#install)
-    - [-](#-)
+    - [Binary Releases](#binary-releases)
     - [Docker](#docker)
     - [Build from source](#build-from-source)
 - [Usage](#usage)
@@ -29,13 +29,13 @@
 <!-- markdown-toc end -->
 
 # Architecture
-![architecture](arch_sidekick.png)
+![architecture](https://raw.githubusercontent.com/minio/sidekick/master/arch_sidekick.png)
 
-**Demo** ![sidekick-demo](sidekick-demo.gif)
+**Demo** ![sidekick-demo](https://raw.githubusercontent.com/minio/sidekick/master/sidekick-demo.gif)
 
 # Install
 
-### Binary Releases
+## Binary Releases
 
 | OS      | ARCH    | Binary                                                                                       |
 |:-------:|:-------:|:--------------------------------------------------------------------------------------------:|
@@ -51,14 +51,14 @@ You can also verify the binary with [minisign](https://jedisct1.github.io/minisi
 minisign -Vm sidekick-<OS>-<ARCH> -P RWTx5Zr1tiHQLwG9keckT0c45M3AGeHD6IvimQHpyRywVWGbP1aVSGav
 ```
 
-### Docker
+## Docker
 
 Pull the latest release via:
 ```
 docker pull minio/sidekick
 ```
 
-### Build from source
+## Build from source
 
 ```
 GO111MODULE=on go get github.com/minio/sidekick/cmd/sidekick
