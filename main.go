@@ -744,7 +744,7 @@ FLAGS:
   {{range .VisibleFlags}}{{.}}
   {{end}}
 SITE:
-  Each SITE is a comma separated list of zones of that site: http://172.17.0.{2...5},http://172.17.0.{6...9}.
+  Each SITE is a comma separated list of pools of that site: http://172.17.0.{2...5},http://172.17.0.{6...9}.
   If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
 
 EXAMPLES:
@@ -757,11 +757,11 @@ EXAMPLES:
   3. Load balance across 4 MinIO Servers using HTTPS and disable TLS certificate validation
      $ sidekick --health-path "/minio/health/cluster" --insecure https://minio{1...4}:9000
 
-  4. Two sites, each site having two zones, each zone having 4 servers:
+  4. Two sites, each site having two pools, each pool having 4 servers:
      $ sidekick --health-path=/minio/health/cluster http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 \
                http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
 
-  5. Two sites, each site having two zones, each zone having 4 servers. After failover, allow read requests to site2 even if it has just read quorum:
+  5. Two sites, each site having two pools, each pool having 4 servers. After failover, allow read requests to site2 even if it has just read quorum:
      $ sidekick --health-path=/minio/health/cluster --read-health-path=/minio/health/cluster/read  http://site1-minio{1...4}:9000,http://site1-minio{5...8}:9000 \
                http://site2-minio{1...4}:9000,http://site2-minio{5...8}:9000
 
