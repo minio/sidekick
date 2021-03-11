@@ -38,18 +38,23 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/minio/cli"
 	xhttp "github.com/minio/minio/cmd/http"
+	"github.com/minio/minio/cmd/logger"
 	"github.com/minio/minio/cmd/rest"
 	"github.com/minio/minio/pkg/console"
 	"github.com/minio/minio/pkg/ellipses"
-	"github.com/minio/sidekick/pkg"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/net/http2"
 )
 
-const slashSeparator = "/"
+// Use e.g.: go build -ldflags "-X main.version=v1.0.0"
+// to set the binary version.
+var version = "0.0.0-dev"
 
-const healthCheckPath = "/v1/health"
+const (
+	slashSeparator  = "/"
+	healthCheckPath = "/v1/health"
+)
 
 var (
 	globalQuietEnabled   bool
@@ -68,7 +73,7 @@ const (
 )
 
 func init() {
-	globalDNSCache = xhttp.NewDNSCache(3*time.Second, 10*time.Second)
+	globalDNSCache = xhttp.NewDNSCache(3*time.Second, 10*time.Second, logger.LogOnceIf)
 
 	// Create a new instance of the logger. You can have any number of instances.
 	log = logrus.New()
@@ -336,7 +341,7 @@ type multisite struct {
 }
 
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Server", "SideKick/"+pkg.ReleaseTag) // indicate sidekick is serving the request
+	w.Header().Set("Server", "SideKick") // indicate sidekick is serving the request
 	for _, s := range m.sites {
 		if s.Online() {
 			if r.URL.Path == healthCheckPath {
@@ -660,9 +665,8 @@ func main() {
 	app.Author = "MinIO, Inc."
 	app.Description = `High-Performance sidecar load-balancer`
 	app.UsageText = "[FLAGS] SITE1 [SITE2..]"
-	app.Version = pkg.Version + " - " + pkg.ShortCommitID
-	app.Copyright = "(c) 2020 MinIO, Inc."
-	app.Compiled, _ = time.Parse(time.RFC3339, pkg.ReleaseTime)
+	app.Version = version
+	app.Copyright = "(c) 2020-2021 MinIO, Inc."
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "address, a",
