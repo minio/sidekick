@@ -78,7 +78,7 @@ Sidekick loadbalancer exposes the following metrics on `/.prometheus/metrics` en
 
 | Metrics Name              | Description                                                      |
 |:-------------------------:|:----------------------------------------------------------------:|
-| `sidekick_requests_total` | Total number of requests in current MinIO instance.              |
-| `sidekick_errors_total`   | Total number of errors in requests in current MinIO instance.    |
-| `sidekick_rx_bytes_total` | Total number of bytes received by current MinIO server instance. |
-| `sidekick_tx_bytes_total` | Total number of bytes sent to current MinIO server instance.     |
+| `sidekick_requests_total` | Total number of requests in current SideKick instance.              |
+| `sidekick_errors_total`   | Total number of errors in requests in current SideKick instance.    |
+| `sidekick_rx_bytes_total` | Total number of bytes received by current SideKick server instance. |
+| `sidekick_tx_bytes_total` | Total number of bytes sent to current SideKick server instance.     |
