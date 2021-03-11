@@ -127,7 +127,6 @@ type ConnStats struct {
 	totalOutputBytes atomic.Uint64
 	totalCalls       atomic.Uint64
 	totalFailedCalls atomic.Uint64
-	totalDowntime    atomic.Duration
 	minLatency       atomic.Duration
 	maxLatency       atomic.Duration
 	status           atomic.String
