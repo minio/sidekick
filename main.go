@@ -324,12 +324,10 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 		}
 		c.setMinLatency(b.Stats.MinLatency)
 		c.setMaxLatency(b.Stats.MaxLatency)
-		c.incInputBytes(b.Stats.Rx)
-		c.incOutputBytes(b.Stats.Tx)
-		c.incTotalCalls()
-		if t.StatusCode >= http.StatusBadRequest {
-			c.incTotalCallFailures()
-		}
+		c.setInputBytes(b.Stats.Rx)
+		c.setOutputBytes(b.Stats.Tx)
+		c.setTotalCalls(b.Stats.TotCalls)
+		c.setTotalCallFailures(b.Stats.TotCallFailures)
 	}
 }
 

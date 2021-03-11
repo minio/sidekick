@@ -174,7 +174,7 @@ func (r *recordRequest) Data() []byte {
 }
 func httpInternalTrace(req *http.Request, resp *http.Response, reqTime, respTime time.Time, backend *Backend) {
 	ti := InternalTrace(req, resp, reqTime, respTime)
-	displayTrace(ti, backend)
+	doTrace(ti, backend)
 }
 
 // InternalTrace returns trace for sidekick http requests
@@ -299,19 +299,21 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 // Log only the headers.
 func httpTraceHdrs(f http.HandlerFunc, w http.ResponseWriter, r *http.Request, backend *Backend) {
 	trace := Trace(f, false, w, r, backend.endpoint)
-	displayTrace(trace, backend)
+	doTrace(trace, backend)
 }
-func displayTrace(trace TraceInfo, backend *Backend) {
+
+func doTrace(trace TraceInfo, backend *Backend) {
 	st := shortTrace(trace)
-	backend.updateCallStats(st)
+	defer backend.updateCallStats(st)
 
 	if globalQuietEnabled || globalTrace == "" {
 		return
 	}
 
-	if globalTrace == "minio" && st.Path != "/minio/health/ready" {
+	if globalTrace == "minio" && st.Path != backend.healthCheckPath {
 		return
 	}
+
 	if globalJSONEnabled {
 		if globalDebugEnabled {
 			buf := &bytes.Buffer{}

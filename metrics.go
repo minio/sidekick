@@ -133,35 +133,34 @@ type ConnStats struct {
 	status           atomic.String
 }
 
-// Increase total input bytes
-func (s *ConnStats) incInputBytes(n int64) {
-	s.totalInputBytes.Add(uint64(n))
+// Store current total input bytes
+func (s *ConnStats) setInputBytes(n int64) {
+	s.totalInputBytes.Store(uint64(n))
 }
 
-// Increase total output bytes
-func (s *ConnStats) incOutputBytes(n int64) {
-	s.totalOutputBytes.Add(uint64(n))
+// Store current total output bytes
+func (s *ConnStats) setOutputBytes(n int64) {
+	s.totalOutputBytes.Store(uint64(n))
 }
 
 // Return total input bytes
 func (s *ConnStats) getTotalInputBytes() uint64 {
 	return s.totalInputBytes.Load()
 }
-func (s *ConnStats) incTotalCalls() {
-	s.totalCalls.Add(1)
+
+// Store current total calls
+func (s *ConnStats) setTotalCalls(n int64) {
+	s.totalCalls.Store(uint64(n))
 }
-func (s *ConnStats) incTotalCallFailures() {
-	s.totalFailedCalls.Add(1)
+
+// Store current total call failures
+func (s *ConnStats) setTotalCallFailures(n int64) {
+	s.totalFailedCalls.Store(uint64(n))
 }
 
 // set backend status
 func (s *ConnStats) setStatus(st string) {
 	s.status.Store(st)
-}
-
-// Increase total downtime
-func (s *ConnStats) incTotalDowntime(t time.Duration) {
-	s.totalDowntime.Add(time.Duration(t))
 }
 
 // set min latency
