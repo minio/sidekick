@@ -59,7 +59,7 @@ func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
 		// total calls per node
 		ch <- prometheus.MustNewConstMetric(
 			prometheus.NewDesc(
-				prometheus.BuildFQName("", "requests", "total"),
+				prometheus.BuildFQName("sidekick", "requests", "total"),
 				"Total number of calls in current MinIO server instance",
 				[]string{"endpoint"}, nil),
 			prometheus.CounterValue,
@@ -68,7 +68,7 @@ func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 		ch <- prometheus.MustNewConstMetric(
 			prometheus.NewDesc(
-				prometheus.BuildFQName("", "errors", "total"),
+				prometheus.BuildFQName("sidekick", "errors", "total"),
 				"Total number of failed calls in current MinIO server instance",
 				[]string{"endpoint"}, nil),
 			prometheus.CounterValue,
@@ -77,7 +77,7 @@ func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 		ch <- prometheus.MustNewConstMetric(
 			prometheus.NewDesc(
-				prometheus.BuildFQName("", "rx", "bytes_total"),
+				prometheus.BuildFQName("sidekick", "rx", "bytes_total"),
 				"Total number of bytes received by current MinIO server instance",
 				[]string{"endpoint"}, nil),
 			prometheus.CounterValue,
@@ -86,7 +86,7 @@ func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 		ch <- prometheus.MustNewConstMetric(
 			prometheus.NewDesc(
-				prometheus.BuildFQName("", "tx", "bytes_total"),
+				prometheus.BuildFQName("sidekick", "tx", "bytes_total"),
 				"Total number of bytes sent by current MinIO server instance",
 				[]string{"endpoint"}, nil),
 			prometheus.CounterValue,

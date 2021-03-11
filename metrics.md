@@ -76,8 +76,9 @@ Here `prometheus.yml` is the name of configuration file. You can now see Sidekic
 
 Sidekick loadbalancer exposes the following metrics on `/.prometheus/metrics` endpoint. All of these can be accessed via Prometheus dashboard.
 
-- `requests_total`: Total number of requests in current MinIO instance.
-- `errors_total`  : Total number of errors in requests in current MinIO instance.
-- `rx_bytes_total`: Total number of bytes received by current MinIO server instance.
-- `tx_bytes_total`: Total number of bytes sent to current MinIO server instance.
-
+| Metrics Name              | Description                                                      |
+|:-------------------------:|:----------------------------------------------------------------:|
+| `sidekick_requests_total` | Total number of requests in current MinIO instance.              |
+| `sidekick_errors_total`   | Total number of errors in requests in current MinIO instance.    |
+| `sidekick_rx_bytes_total` | Total number of bytes received by current MinIO server instance. |
+| `sidekick_tx_bytes_total` | Total number of bytes sent to current MinIO server instance.     |
