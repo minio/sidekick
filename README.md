@@ -4,30 +4,6 @@
 
 *sidekick* is a high-performance sidecar load-balancer. By attaching a tiny load balancer as a sidecar to each of the client application processes, you can eliminate the centralized loadbalancer bottleneck and DNS failover management. *sidekick* automatically avoids sending traffic to the failed servers by checking their health via the readiness API and HTTP error returns.
 
-<!-- markdown-toc start - Don't edit this section. Run M-x markdown-toc-refresh-toc -->
-**Table of Contents**
-
-- [Architecture](#architecture)
-- [Install](#install)
-    - [Binary Releases](#binary-releases)
-    - [Docker](#docker)
-    - [Build from source](#build-from-source)
-- [Usage](#usage)
-    - [Examples](#examples)
-        - [Load balance across a web service using DNS provided IPs](#load-balance-across-a-web-service-using-dns-provided-ips)
-        - [Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)](#load-balance-across-4-minio-servers-httpminio19000-to-httpminio49000)
-        - [Two sites with 4 servers each](#two-sites-with-4-servers-each)
-    - [Realworld Example with spark-orchestrator](#realworld-example-with-spark-orchestrator)
-        - [Configure *spark-orchestrator*](#configure-spark-orchestrator)
-        - [Install *MinIO*](#install-minio)
-        - [Run the spark job in k8s](#run-the-spark-job-in-k8s)
-        - [High Performance S3 Cache](#high-performance-s3-cache)
-            - [Run sidekick configured with high performance cache on baremetal](#run-sidekick-configured-with-high-performance-cache-on-baremetal)
-            - [Run the spark job in k8s](#run-the-spark-job-in-k8s-1)
-            - [Features](#features)
-
-<!-- markdown-toc end -->
-
 # Architecture
 ![architecture](https://raw.githubusercontent.com/minio/sidekick/master/arch_sidekick.png)
 
