@@ -85,7 +85,7 @@ $ sidekick --health-path=/minio/health/ready --address :8000 http://minio{1...4}
 $ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000 http://site2-minio{1...4}:9000
 ```
 
-## Realworld Example with spark-orchestrator
+## Realworld Example with spark-operator
 
 As spark *driver*, *executor* sidecars, to begin with install spark-operator and MinIO on your kubernetes cluster
 
@@ -94,7 +94,7 @@ As spark *driver*, *executor* sidecars, to begin with install spark-operator and
 kubectl create ns spark-operator
 ```
 
-### Configure *spark-orchestrator*
+### Configure *spark-operator*
 
 We shall be using maintained spark operator by GCP at https://github.com/GoogleCloudPlatform/spark-on-k8s-operator
 
@@ -209,7 +209,7 @@ sidekick --health-path=/minio/health/ready http://minio{1...16}:9000
 ```
 
 #### Run the spark job in k8s
-Following example shows on how to configure sidekick as high performance cache sidecar with spark orchestrator framework on kubernetes environment.
+Following example shows on how to configure sidekick as high performance cache sidecar with spark operator framework on kubernetes environment.
 
 ```yml
 apiVersion: "sparkoperator.k8s.io/v1beta2"
