@@ -46,26 +46,35 @@ GO111MODULE=on go get github.com/minio/sidekick/cmd/sidekick
 # Usage
 
 ```
+NAME:
+  sidekick - High-Performance sidecar load-balancer
+
 USAGE:
-  sidekick [FLAGS] SITE1 [SITE2..]
+  sidekick - [FLAGS] SITE1 [SITE2..]
 
 FLAGS:
-  --address value, -a value          listening address for sidekick (default: ":8080")
-  --health-path value, -p value      health check path
-  --health-duration value, -d value  health check duration in seconds (default: 5)
-  --insecure, -i                     disable TLS certificate verification
-  --log , -l                         enable logging
-  --trace, -t                        enable HTTP tracing
-  --quiet                            disable console messages
-  --json                             output sidekick logs and trace in json format
-  --debug                            output verbose trace
-  --help, -h                         show help
-  --version, -v                      print the version
+  --address value, -a value           listening address for sidekick (default: ":8080")
+  --health-path value, -p value       health check path
+  --read-health-path value, -r value  health check path for read access - valid only for failover site
+  --health-port value                 health check port (default: 0)
+  --health-duration value, -d value   health check duration in seconds (default: 5)
+  --insecure, -i                      disable TLS certificate verification
+  --log, -l                           enable logging
+  --trace value, -t value             enable request tracing - valid values are [all,application,minio] (default: "all")
+  --quiet, -q                         disable console messages
+  --json                              output sidekick logs and trace in json format
+  --debug                             output verbose trace
+  --cacert value                      CA certificate to verify peer against
+  --client-cert value                 client certificate file
+  --client-key value                  client private key file
+  --cert value                        server certificate file
+  --key value                         server private key file
+  --help, -h                          show help
+  --version, -v                       print the version
 
 SITE:
-Each SITE is a comma separated list of pools of the same site: http://172.17.0.{2...5},http://172.17.0.{6...9}
-If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
-Two sites are separated by a space character.
+  Each SITE is a comma separated list of pools of that site: http://172.17.0.{2...5},http://172.17.0.{6...9}.
+  If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
 ```
 
 ## Examples
