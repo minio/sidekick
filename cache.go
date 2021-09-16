@@ -698,10 +698,11 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 			pipeReader, pipeWriter := io.Pipe()
 			mw := cacheMultiWriter(w, pipeWriter)
 			go func() {
-				_, err := clnt.PutObject(r.Context(), clnt.bucket, key,
+				_, err := clnt.PutObject(context.Background(), clnt.bucket, key,
 					io.LimitReader(pipeReader, resultContentLength), resultContentLength,
 					"", "", minio.PutObjectOptions{
-						UserMetadata: getPutMetadata(result.Header),
+						UserMetadata:     getPutMetadata(result.Header),
+						DisableMultipart: true,
 					})
 				if err != nil {
 					clnt.setOffline()
