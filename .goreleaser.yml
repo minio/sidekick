@@ -67,7 +67,7 @@ changelog:
 dockers:
 - image_templates:
   - "minio/sidekick:{{ .Tag }}-amd64"
-  use_buildx: true
+  use: buildx
   dockerfile: Dockerfile.release
   extra_files:
     - LICENSE
@@ -76,7 +76,7 @@ dockers:
   - "--platform=linux/amd64"
 - image_templates:
   - "minio/sidekick:{{ .Tag }}-ppc64le"
-  use_buildx: true
+  use: buildx
   dockerfile: Dockerfile.release
   extra_files:
     - LICENSE
@@ -85,7 +85,7 @@ dockers:
   - "--platform=linux/ppc64le"
 - image_templates:
   - "minio/sidekick:{{ .Tag }}-s390x"
-  use_buildx: true
+  use: buildx
   dockerfile: Dockerfile.release
   extra_files:
     - LICENSE
@@ -94,7 +94,7 @@ dockers:
   - "--platform=linux/s390x"
 - image_templates:
   - "minio/sidekick:{{ .Tag }}-arm64"
-  use_buildx: true
+  use: buildx
   goarch: arm64
   dockerfile: Dockerfile.release
   extra_files:
