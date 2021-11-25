@@ -31,17 +31,17 @@ minisign -Vm sidekick-<OS>-<ARCH> -P RWTx5Zr1tiHQLwG9keckT0c45M3AGeHD6IvimQHpyRy
 
 Pull the latest release via:
 ```
-docker pull minio/sidekick
+docker pull minio/sidekick:v1.1.0
 ```
 
 ## Build from source
 
 ```
-GO111MODULE=on go get github.com/minio/sidekick/cmd/sidekick
+go install -v github.com/minio/sidekick@latest
 ```
-> You will need a working Go environment. Therefore, please follow [How to install Go](https://golang.org/doc/install).
-> Minimum version required is go1.16
 
+> You will need a working Go environment. Therefore, please follow [How to install Go](https://golang.org/doc/install).
+> Minimum version required is go1.17
 
 # Usage
 
