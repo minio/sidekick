@@ -38,10 +38,7 @@ import (
 	"github.com/minio/cli"
 	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	xhttp "github.com/minio/minio/cmd/http"
-	"github.com/minio/minio/cmd/logger"
-	"github.com/minio/minio/pkg/console"
-	xioutil "github.com/minio/minio/pkg/ioutil"
+	"github.com/minio/pkg/console"
 )
 
 const (
@@ -322,10 +319,10 @@ func getCacheResponseHeaders(oi minio.ObjectInfo) (ch cacheHeader) {
 	}
 
 	// Set content length.
-	ch.Header.Set(xhttp.ContentLength, strconv.FormatInt(rangeLen, 10))
+	ch.Header.Set("Content-Length", strconv.FormatInt(rangeLen, 10))
 	if ch.Range() != nil {
 		contentRange := fmt.Sprintf("bytes %d-%d/%d", start, start+rangeLen-1, oi.Size)
-		ch.Header.Set(xhttp.ContentRange, contentRange)
+		ch.Header.Set("Content-Range", contentRange)
 	}
 
 	return ch
@@ -333,8 +330,8 @@ func getCacheResponseHeaders(oi minio.ObjectInfo) (ch cacheHeader) {
 
 //Expires returns expires header from cached response
 func (c cacheHeader) Expires() time.Time {
-	if v, ok := c.Header[xhttp.Expires]; ok {
-		if t, e := time.Parse(http.TimeFormat, strings.Join(v, "")); e == nil {
+	if v := c.Header.Get("Expires"); v != "" {
+		if t, e := time.Parse(http.TimeFormat, v); e == nil {
 			return t.UTC()
 		}
 	}
@@ -343,13 +340,13 @@ func (c cacheHeader) Expires() time.Time {
 
 //ETag returns ETag from cached response
 func (c cacheHeader) ETag() string {
-	return c.Header.Get(xhttp.ETag)
+	return c.Header.Get("Etag")
 }
 
 //LastModified returns last modified header from cached response
 func (c cacheHeader) LastModified() time.Time {
-	if v, ok := c.Header[xhttp.LastModified]; ok {
-		if t, e := time.Parse(http.TimeFormat, strings.Join(v, "")); e == nil {
+	if v := c.Header.Get("Last-Modified"); v != "" {
+		if t, e := time.Parse(http.TimeFormat, v); e == nil {
 			return t.UTC()
 		}
 	}
@@ -576,11 +573,11 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 			serveCache = isFresh(cc, reqCC, cacheHdrs.LastModified())
 			if !serveCache {
 				// set cache headers for ETag and LastModified verification
-				if r.Header.Get(xhttp.ETag) == "" && cacheHdrs.ETag() != "" {
-					r.Header.Set(xhttp.IfNoneMatch, cacheHdrs.ETag())
+				if r.Header.Get("Etag") == "" && cacheHdrs.ETag() != "" {
+					r.Header.Set("If-None-Match", cacheHdrs.ETag())
 				}
-				if r.Header.Get(xhttp.LastModified) == "" && !cacheHdrs.LastModified().IsZero() {
-					r.Header.Set(xhttp.IfModifiedSince, cacheHdrs.LastModified().UTC().Format(http.TimeFormat))
+				if r.Header.Get("Last-Modified") == "" && !cacheHdrs.LastModified().IsZero() {
+					r.Header.Set("If-Modified-Since", cacheHdrs.LastModified().UTC().Format(http.TimeFormat))
 				}
 			}
 		}
@@ -645,7 +642,7 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 				if cacheHdrs.Range() != nil {
 					w.WriteHeader(http.StatusPartialContent)
 				}
-				httpWriter := xioutil.WriteOnClose(w)
+				httpWriter := WriteOnClose(w)
 				// Write object content to response body
 				if _, err := io.Copy(httpWriter, reader); err != nil {
 					if !httpWriter.HasWritten() && !statusCodeWritten { // write error response only if no data or headers has been written to client yet
@@ -677,7 +674,7 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 				}
 				mustCache = false
 			}
-			rs := result.Header.Get(xhttp.ContentRange)
+			rs := result.Header.Get("Content-Range")
 			if rs != "" {
 				// Avoid caching range GET's for now.
 				if cacheErr == nil {
@@ -690,7 +687,7 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 
 			if !mustCache || result.ContentLength < clnt.minSize {
 				if _, err := io.Copy(w, io.LimitReader(result.Body, result.ContentLength)); err != nil {
-					logger.LogIf(context.Background(), err)
+					log2.Println(err)
 				}
 				return
 			}
@@ -706,13 +703,13 @@ func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.Handl
 					})
 				if err != nil {
 					clnt.setOffline()
-					logger.LogIf(context.Background(), err, "Failed to cache object")
+					log2.Println(err)
 				}
 				pipeReader.CloseWithError(err)
 			}()
 			_, err := io.Copy(mw, io.LimitReader(result.Body, result.ContentLength))
 			if err != nil {
-				logger.LogIf(context.Background(), err)
+				log2.Println(err)
 			}
 		}
 	}

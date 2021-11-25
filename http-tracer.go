@@ -29,8 +29,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 
-	"github.com/minio/minio/pkg/console"
-	"github.com/minio/minio/pkg/handlers"
+	"github.com/minio/pkg/console"
 )
 
 // recordRequest - records the first recLen bytes
@@ -205,7 +204,7 @@ func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime tim
 		Method:   req.Method,
 		Path:     req.URL.Path,
 		RawQuery: req.URL.RawQuery,
-		Client:   handlers.GetSourceIP(req),
+		Client:   getSourceIP(req),
 		Headers:  reqHeaders,
 		Body:     string(reqBodyRecorder.Data()),
 	}
@@ -264,7 +263,7 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 		Method:   r.Method,
 		Path:     r.URL.Path,
 		RawQuery: r.URL.RawQuery,
-		Client:   handlers.GetSourceIP(r),
+		Client:   getSourceIP(r),
 		Headers:  reqHeaders,
 		Body:     string(reqBodyRecorder.Data()),
 	}

@@ -1,21 +1,7 @@
-// Copyright (c) 2020 MinIO, Inc.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.package main
-
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -33,18 +19,18 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/minio/cli"
-	xhttp "github.com/minio/minio/cmd/http"
-	"github.com/minio/minio/cmd/logger"
-	"github.com/minio/minio/cmd/rest"
-	"github.com/minio/minio/pkg/console"
-	"github.com/minio/minio/pkg/ellipses"
+	"github.com/minio/pkg/console"
+	"github.com/minio/pkg/ellipses"
+	"github.com/rs/dnscache"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/net/http2"
+	"golang.org/x/sys/unix"
 )
 
 // Use e.g.: go build -ldflags "-X main.version=v1.0.0"
@@ -64,8 +50,7 @@ var (
 	globalJSONEnabled    bool
 	globalConsoleDisplay bool
 	globalConnStats      []*ConnStats
-	globalDNSCache       *xhttp.DNSCache
-	log                  *logrus.Logger
+	log2                 *logrus.Logger
 )
 
 const (
@@ -73,10 +58,8 @@ const (
 )
 
 func init() {
-	globalDNSCache = xhttp.NewDNSCache(3*time.Second, 10*time.Second, logger.LogOnceIf)
-
 	// Create a new instance of the logger. You can have any number of instances.
-	log = logrus.New()
+	log2 = logrus.New()
 }
 
 func logMsg(msg logMessage) error {
@@ -458,10 +441,100 @@ func getCertKeyPair(cert, key string) []tls.Certificate {
 	return []tls.Certificate{keyPair}
 }
 
+// dialContextWithDNSCache is a helper function which returns `net.DialContext` function.
+// It randomly fetches an IP from the DNS cache and dials it by the given dial
+// function. It dials one by one and returns first connected `net.Conn`.
+// If it fails to dial all IPs from cache it returns first error. If no baseDialFunc
+// is given, it sets default dial function.
+//
+// You can use returned dial function for `http.Transport.DialContext`.
+//
+// In this function, it uses functions from `rand` package. To make it really random,
+// you MUST call `rand.Seed` and change the value from the default in your application
+func dialContextWithDNSCache(resolver *dnscache.Resolver, baseDialCtx DialContext) DialContext {
+	if baseDialCtx == nil {
+		// This is same as which `http.DefaultTransport` uses.
+		baseDialCtx = (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext
+	}
+	return func(ctx context.Context, network, addr string) (conn net.Conn, err error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+
+		if net.ParseIP(host) != nil {
+			// For IP only setups there is no need for DNS lookups.
+			return baseDialCtx(ctx, "tcp", addr)
+		}
+
+		ips, err := resolver.LookupHost(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, ip := range ips {
+			conn, err = baseDialCtx(ctx, "tcp", net.JoinHostPort(ip, port))
+			if err == nil {
+				break
+			}
+		}
+
+		return
+	}
+}
+
+var dnsCache = &dnscache.Resolver{
+	Timeout: 5 * time.Second,
+}
+
+func setTCPParameters(network, address string, c syscall.RawConn) error {
+	c.Control(func(fdPtr uintptr) {
+		// got socket file descriptor to set parameters.
+		fd := int(fdPtr)
+
+		_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
+
+		_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+
+		// Enable TCP open
+		// https://lwn.net/Articles/508865/ - 16k queue size.
+		_ = syscall.SetsockoptInt(fd, syscall.SOL_TCP, unix.TCP_FASTOPEN, 16*1024)
+
+		// Enable TCP fast connect
+		// TCPFastOpenConnect sets the underlying socket to use
+		// the TCP fast open connect. This feature is supported
+		// since Linux 4.11.
+		_ = syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, unix.TCP_FASTOPEN_CONNECT, 1)
+
+		// Enable TCP quick ACK, John Nagle says
+		// "Set TCP_QUICKACK. If you find a case where that makes things worse, let me know."
+		_ = syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, unix.TCP_QUICKACK, 1)
+
+	})
+	return nil
+}
+
+// DialContext is a function to make custom Dial for internode communications
+type DialContext func(ctx context.Context, network, address string) (net.Conn, error)
+
+// newProxyDialContext setups a custom dialer for internode communication
+func newProxyDialContext(dialTimeout time.Duration) DialContext {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{
+			Timeout: dialTimeout,
+			Control: setTCPParameters,
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
+}
+
 func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           xhttp.DialContextWithDNSCache(globalDNSCache, xhttp.NewInternodeDialContext(rest.DefaultTimeout)),
+		DialContext:           dialContextWithDNSCache(dnsCache, newProxyDialContext(10*time.Second)),
 		MaxIdleConnsPerHost:   1024,
 		IdleConnTimeout:       15 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,
@@ -587,15 +660,13 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 }
 
 func sidekickMain(ctx *cli.Context) {
-	defer globalDNSCache.Stop()
-
 	checkMain(ctx)
 
-	log.SetFormatter(&logrus.TextFormatter{
+	log2.SetFormatter(&logrus.TextFormatter{
 		DisableColors: true,
 		FullTimestamp: true,
 	})
-	log.SetReportCaller(true)
+	log2.SetReportCaller(true)
 
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthReadCheckPath := ctx.GlobalString("read-health-path")

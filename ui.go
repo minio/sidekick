@@ -24,8 +24,8 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
-	"github.com/gdamore/tcell"
-	"github.com/minio/minio/pkg/console"
+	"github.com/gdamore/tcell/v2"
+	"github.com/minio/pkg/console"
 	"github.com/rivo/tview"
 )
 
