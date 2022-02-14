@@ -8,16 +8,16 @@ require (
 	github.com/gdamore/tcell/v2 v2.4.1-0.20210905002822-f057f0a857a1
 	github.com/gorilla/mux v1.8.0
 	github.com/minio/cli v1.22.0
-	github.com/minio/minio-go/v7 v7.0.16
+	github.com/minio/minio-go/v7 v7.0.21
 	github.com/minio/pkg v1.1.9
-	github.com/prometheus/client_golang v1.11.0
-	github.com/rivo/tview v0.0.0-20211109175620-badfa0f0b301
-	github.com/rs/dnscache v0.0.0-20210201191234-295bba877686
+	github.com/prometheus/client_golang v1.12.1
+	github.com/rivo/tview v0.0.0-20220129131435-1f7581b67bd1
+	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/sirupsen/logrus v1.8.1
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
 	golang.org/x/net v0.0.0-20211020060615-d418f374d309
-	golang.org/x/sys v0.0.0-20211020174200-9d6173849985
+	golang.org/x/sys v0.0.0-20220114195835-da31bd327af9
 )
 
 require (
@@ -42,7 +42,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
-	github.com/prometheus/common v0.31.1 // indirect
+	github.com/prometheus/common v0.32.1 // indirect
 	github.com/prometheus/procfs v0.7.3 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/rs/xid v1.3.0 // indirect
