@@ -40,7 +40,6 @@ import (
 	"github.com/rs/dnscache"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh/terminal"
-	"golang.org/x/net/http2"
 
 	"github.com/minio/cli"
 	"github.com/minio/pkg/console"
@@ -143,7 +142,7 @@ type Backend struct {
 	up                  int32
 	healthCheckPath     string
 	healthCheckPort     int
-	healthCheckDuration int
+	healthCheckDuration time.Duration
 	Stats               *BackendStats
 	cacheClient         *S3CacheClient
 }
@@ -251,7 +250,7 @@ func (b *Backend) healthCheck() {
 				logMsg(logMessage{Endpoint: b.endpoint, Error: err})
 			}
 			b.setOffline()
-			time.Sleep(time.Duration(b.healthCheckDuration) * time.Second)
+			time.Sleep(b.healthCheckDuration)
 			continue
 		}
 
@@ -294,7 +293,7 @@ func (b *Backend) healthCheck() {
 				httpInternalTrace(req, resp, reqTime, respTime, b)
 			}
 		}
-		time.Sleep(time.Duration(b.healthCheckDuration) * time.Second)
+		time.Sleep(b.healthCheckDuration)
 	}
 }
 
@@ -390,7 +389,7 @@ func (s *site) nextProxy() *Backend {
 // ServeHTTP - LoadBalancer implements http.Handler
 func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := s.nextProxy()
-	if backend != nil {
+	if backend != nil && backend.Online() {
 		cacheHandlerFn := func(w http.ResponseWriter, r *http.Request) {
 			if backend.cacheClient != nil {
 				cacheHandler(w, r, backend)(w, r)
@@ -518,11 +517,16 @@ func newProxyDialContext(dialTimeout time.Duration) DialContext {
 	}
 }
 
+// tlsClientSessionCacheSize is the cache size for TLS client sessions.
+const tlsClientSessionCacheSize = 100
+
 func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           dialContextWithDNSCache(dnsCache, newProxyDialContext(10*time.Second)),
 		MaxIdleConnsPerHost:   1024,
+		WriteBufferSize:       32 << 10, // 32KiB moving up from 4KiB default
+		ReadBufferSize:        32 << 10, // 32KiB moving up from 4KiB default
 		IdleConnTimeout:       15 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: 15 * time.Second,
@@ -538,7 +542,6 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	if enableTLS {
 		// Keep TLS config.
 		tr.TLSClientConfig = &tls.Config{
-			NextProtos:         []string{"h2", "http/1.1"},
 			RootCAs:            getCertPool(ctx.GlobalString("cacert")),
 			Certificates:       getCertKeyPair(ctx.GlobalString("client-cert"), ctx.GlobalString("client-key")),
 			InsecureSkipVerify: ctx.GlobalBool("insecure"),
@@ -547,11 +550,8 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 			// Can't use TLSv1.1 because of RC4 cipher usage
 			MinVersion:               tls.VersionTLS12,
 			PreferServerCipherSuites: true,
+			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
 		}
-	}
-
-	if tr.TLSClientConfig != nil {
-		http2.ConfigureTransport(tr)
 	}
 
 	return tr
@@ -563,7 +563,7 @@ func checkMain(ctx *cli.Context) {
 	}
 }
 
-func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration int) *site {
+func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration time.Duration) *site {
 	var endpoints []string
 
 	if ellipses.HasEllipses(siteStrs...) {
@@ -658,7 +658,7 @@ func sidekickMain(ctx *cli.Context) {
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthReadCheckPath := ctx.GlobalString("read-health-path")
 	healthCheckPort := ctx.GlobalInt("health-port")
-	healthCheckDuration := ctx.GlobalInt("health-duration")
+	healthCheckDuration := ctx.GlobalDuration("health-duration")
 	addr := ctx.GlobalString("address")
 	globalLoggingEnabled = ctx.GlobalBool("log")
 	globalTrace = ctx.GlobalString("trace")
@@ -743,10 +743,10 @@ func main() {
 			Name:  "health-port",
 			Usage: "health check port",
 		},
-		cli.IntFlag{
+		cli.DurationFlag{
 			Name:  "health-duration, d",
 			Usage: "health check duration in seconds",
-			Value: 5,
+			Value: 5 * time.Second,
 		},
 		cli.BoolFlag{
 			Name:  "insecure, i",
