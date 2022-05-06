@@ -31,7 +31,7 @@ minisign -Vm sidekick-<OS>-<ARCH> -P RWTx5Zr1tiHQLwG9keckT0c45M3AGeHD6IvimQHpyRy
 
 Pull the latest release via:
 ```
-docker pull minio/sidekick:v1.1.0
+docker pull minio/sidekick:v2.0.0
 ```
 
 ## Build from source
@@ -57,7 +57,7 @@ FLAGS:
   --health-path value, -p value       health check path
   --read-health-path value, -r value  health check path for read access - valid only for failover site
   --health-port value                 health check port (default: 0)
-  --health-duration value, -d value   health check duration in seconds (default: 5)
+  --health-duration value, -d value   health check duration in seconds (default: 5s)
   --insecure, -i                      disable TLS certificate verification
   --log, -l                           enable logging
   --trace value, -t value             enable request tracing - valid values are [all,application,minio] (default: "all")
@@ -71,10 +71,6 @@ FLAGS:
   --key value                         server private key file
   --help, -h                          show help
   --version, -v                       print the version
-
-SITE:
-  Each SITE is a comma separated list of pools of that site: http://172.17.0.{2...5},http://172.17.0.{6...9}.
-  If all servers in SITE1 are down, then the traffic is routed to the next site - SITE2.
 ```
 
 ## Examples
