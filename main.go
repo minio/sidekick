@@ -301,7 +301,7 @@ func (b *Backend) updateDowntime(downtime time.Duration) {
 	b.Stats.Lock()
 	defer b.Stats.Unlock()
 	b.Stats.LastDowntime = downtime
-	b.Stats.CumDowntime = b.Stats.CumDowntime + downtime
+	b.Stats.CumDowntime += downtime
 }
 
 // updateCallStats updates the cumulative stats for each call to backend
@@ -424,7 +424,7 @@ func getCertPool(cacert string) *x509.CertPool {
 	if err != nil {
 		console.Fatalln(fmt.Errorf("unable to load CA certificate: %s", err))
 	}
-	ok := pool.AppendCertsFromPEM([]byte(caPEM))
+	ok := pool.AppendCertsFromPEM(caPEM)
 	if !ok {
 		console.Fatalln(fmt.Errorf("unable to load CA certificate: %s is not valid certificate", cacert))
 	}
@@ -447,7 +447,7 @@ func getCertKeyPair(cert, key string) []tls.Certificate {
 	if err != nil {
 		console.Fatalln(fmt.Errorf("unable to load key: %s", err))
 	}
-	keyPair, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+	keyPair, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		console.Fatalln(fmt.Errorf("%s", err))
 	}
@@ -631,7 +631,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 			Transport: transport,
 		}
 
-		stats := BackendStats{MinLatency: time.Duration(24 * time.Hour), MaxLatency: time.Duration(0)}
+		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
 		}, 0, healthCheckPath, healthCheckPort, healthCheckDuration, &stats, newCacheClient(ctx, cacheCfg)}

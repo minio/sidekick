@@ -61,6 +61,7 @@ func (r *recordRequest) Read(p []byte) (n int, err error) {
 	}
 	return n, err
 }
+
 func (r *recordRequest) Size() int {
 	sz := r.bytesRead
 	for k, v := range r.headers {
@@ -171,6 +172,7 @@ func (r *recordRequest) Data() []byte {
 	// ... otherwise we return <BODY> placeholder
 	return BodyPlaceHolder
 }
+
 func httpInternalTrace(req *http.Request, resp *http.Response, reqTime, respTime time.Time, backend *Backend) {
 	ti := InternalTrace(req, resp, reqTime, respTime)
 	doTrace(ti, backend)
@@ -370,7 +372,7 @@ type shortTraceMsg struct {
 }
 
 func (s shortTraceMsg) String() string {
-	var b = &strings.Builder{}
+	b := &strings.Builder{}
 	fmt.Fprintf(b, " %5s: ", TraceMsgType)
 	fmt.Fprintf(b, "%s ", s.Time.Format(timeFormat))
 	statusStr := console.Colorize("RespStatus", fmt.Sprintf("%d %s", s.StatusCode, s.StatusMsg))
@@ -418,9 +420,10 @@ func shortTrace(t TraceInfo) shortTraceMsg {
 	s.Method = t.ReqInfo.Method
 	return s
 }
+
 func (trc TraceInfo) String() string {
 	var nodeNameStr string
-	var b = &strings.Builder{}
+	b := &strings.Builder{}
 
 	if trc.NodeName != "" {
 		nodeNameStr = fmt.Sprintf("%s: %s ", console.Colorize("TraceMsgType", DebugMsgType), trc.NodeName)
@@ -446,7 +449,7 @@ func (trc TraceInfo) String() string {
 			fmt.Sprintf("%s: ", k))+console.Colorize("HeaderValue", fmt.Sprintf("%s\n", strings.Join(v, ""))))
 	}
 
-	fmt.Fprintf(b, "%s%s", nodeNameStr, console.Colorize("Body", fmt.Sprintf("%s\n", string(ri.Body))))
+	fmt.Fprintf(b, "%s%s", nodeNameStr, console.Colorize("Body", fmt.Sprintf("%s\n", ri.Body)))
 	fmt.Fprintf(b, "%s%s", nodeNameStr, console.Colorize("Response", "[RESPONSE] "))
 	fmt.Fprintf(b, "[%s] ", rs.Time.Format(timeFormat))
 	fmt.Fprint(b, console.Colorize("Stat", fmt.Sprintf("[ Duration %2s  ↑ %s  ↓ %s ]\n", trc.CallStats.Latency.Round(time.Microsecond), humanize.IBytes(uint64(trc.CallStats.Rx)), humanize.IBytes(uint64(trc.CallStats.Tx)))))
@@ -461,7 +464,7 @@ func (trc TraceInfo) String() string {
 		fmt.Fprintf(b, "%s%s", nodeNameStr, console.Colorize("RespHeaderKey",
 			fmt.Sprintf("%s: ", k))+console.Colorize("HeaderValue", fmt.Sprintf("%s\n", strings.Join(v, ""))))
 	}
-	fmt.Fprintf(b, "%s%s\n", nodeNameStr, console.Colorize("Body", string(rs.Body)))
+	fmt.Fprintf(b, "%s%s\n", nodeNameStr, console.Colorize("Body", rs.Body))
 	fmt.Fprint(b, nodeNameStr)
 	return b.String()
 }

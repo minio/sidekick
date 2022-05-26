@@ -12,11 +12,21 @@ linters:
     - goimports
     - misspell
     - govet
-    - golint
+    - revive
     - ineffassign
     - gosimple
     - deadcode
     - structcheck
+    - gomodguard
+    - gofmt
+    - unused
+    - structcheck
+    - unconvert
+    - varcheck
+    - gocritic
+    - gofumpt
+    - tenv
+    - durationcheck
 
 issues:
   exclude-use-default: false

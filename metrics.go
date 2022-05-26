@@ -50,7 +50,6 @@ func (c *sidekickCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect is called by the Prometheus registry when collecting metrics.
 func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
-
 	for _, c := range globalConnStats {
 		if c == nil {
 			continue
@@ -94,7 +93,6 @@ func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
 			c.endpoint,
 		)
 	}
-
 }
 
 func metricsHandler() (http.Handler, error) {
@@ -117,7 +115,6 @@ func metricsHandler() (http.Handler, error) {
 				ErrorHandling: promhttp.ContinueOnError,
 			}),
 	), nil
-
 }
 
 // ConnStats - statistics on backend
@@ -129,7 +126,6 @@ type ConnStats struct {
 	totalFailedCalls atomic.Uint64
 	minLatency       atomic.Duration
 	maxLatency       atomic.Duration
-	status           atomic.String
 }
 
 // Store current total input bytes
@@ -155,11 +151,6 @@ func (s *ConnStats) setTotalCalls(n int64) {
 // Store current total call failures
 func (s *ConnStats) setTotalCallFailures(n int64) {
 	s.totalFailedCalls.Store(uint64(n))
-}
-
-// set backend status
-func (s *ConnStats) setStatus(st string) {
-	s.status.Store(st)
 }
 
 // set min latency

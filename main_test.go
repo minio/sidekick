@@ -54,7 +54,6 @@ func TestGetHealthCheckURL_Valid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// ----- call -----------------------------------------------------
 			healthCheckURL, err := getHealthCheckURL(tc.endpoint, tc.healthCheckPath, tc.healthCheckPort)
-
 			// ----- verify ---------------------------------------------------
 			if err != nil {
 				t.Errorf("Expected no error, got %q", err)

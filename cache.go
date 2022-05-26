@@ -79,11 +79,12 @@ type S3CacheClient struct {
 
 func (c *S3CacheClient) setOffline() {
 	atomic.StoreInt32(&c.up, 0)
-
 }
+
 func (c *S3CacheClient) isOnline() bool {
 	return atomic.LoadInt32(&c.up) == 1
 }
+
 func (c *S3CacheClient) isCacheable(method string) bool {
 	for _, m := range c.methods {
 		if method == m {
@@ -102,7 +103,7 @@ func (c *S3CacheClient) healthCheck() {
 				logMsg(logMessage{Endpoint: c.endpoint, Error: err})
 			}
 			c.setOffline()
-			time.Sleep(time.Duration(c.healthCheckDuration) * time.Second)
+			time.Sleep(c.healthCheckDuration)
 			continue
 		}
 
@@ -121,7 +122,7 @@ func (c *S3CacheClient) healthCheck() {
 			}
 
 		}
-		time.Sleep(time.Duration(c.healthCheckDuration) * time.Second)
+		time.Sleep(c.healthCheckDuration)
 	}
 }
 
@@ -213,18 +214,21 @@ func parseCacheControlHeaders(header http.Header) *cacheControl {
 	}
 	return &c
 }
+
 func (c *cacheControl) revalidate() bool {
 	if c == nil {
 		return true
 	}
 	return c.noCache || c.mustRevalidate
 }
+
 func (c *cacheControl) neverCache() bool {
 	if c == nil {
 		return false
 	}
 	return c.private || c.noStore
 }
+
 func (c *cacheControl) fresh(modTime time.Time) bool {
 	if c == nil {
 		return false
@@ -328,7 +332,7 @@ func getCacheResponseHeaders(oi minio.ObjectInfo) (ch cacheHeader) {
 	return ch
 }
 
-//Expires returns expires header from cached response
+// Expires returns expires header from cached response
 func (c cacheHeader) Expires() time.Time {
 	if v := c.Header.Get("Expires"); v != "" {
 		if t, e := time.Parse(http.TimeFormat, v); e == nil {
@@ -338,12 +342,12 @@ func (c cacheHeader) Expires() time.Time {
 	return time.Time{}
 }
 
-//ETag returns ETag from cached response
+// ETag returns ETag from cached response
 func (c cacheHeader) ETag() string {
 	return c.Header.Get("Etag")
 }
 
-//LastModified returns last modified header from cached response
+// LastModified returns last modified header from cached response
 func (c cacheHeader) LastModified() time.Time {
 	if v := c.Header.Get("Last-Modified"); v != "" {
 		if t, e := time.Parse(http.TimeFormat, v); e == nil {
@@ -505,6 +509,7 @@ func (h *HTTPRangeSpec) String(resourceSize int64) string {
 	}
 	return fmt.Sprintf("%d-%d", off, off+length-1)
 }
+
 func (c cacheHeader) Range() (rs *HTTPRangeSpec) {
 	if rangeHeader, ok := c.Header["Range"]; ok {
 		if len(rangeHeader) != 0 {
@@ -527,6 +532,7 @@ func getPutMetadata(h http.Header) map[string]string {
 	}
 	return metadata
 }
+
 func isFresh(cacheCC, reqCC *cacheControl, lastModified time.Time) bool {
 	if cacheCC == nil && reqCC == nil {
 		return false
@@ -753,7 +759,8 @@ func newCacheConfig() *cacheConfig {
 			console.Fatalln(fmt.Errorf("Unable to parse SIDEKICK_CACHE_HEALTH_DURATION %s should be an integer", durationStr))
 		}
 	}
-	return &cacheConfig{endpoint: cURL,
+	return &cacheConfig{
+		endpoint:  cURL,
 		accessKey: accessKey,
 		secretKey: secretKey,
 		bucket:    bucket,
@@ -761,6 +768,7 @@ func newCacheConfig() *cacheConfig {
 		duration:  time.Duration(duration) * time.Second,
 	}
 }
+
 func newCacheClient(ctx *cli.Context, cfg *cacheConfig) *S3CacheClient {
 	if cfg == nil {
 		return nil
@@ -844,14 +852,14 @@ func newCacheClient(ctx *cli.Context, cfg *cacheConfig) *S3CacheClient {
 	return s3Clnt
 }
 
-func sortURLParams(URL *url.URL) {
-	params := URL.Query()
+func sortURLParams(u *url.URL) {
+	params := u.Query()
 	for _, param := range params {
 		sort.Slice(param, func(i, j int) bool {
 			return param[i] < param[j]
 		})
 	}
-	URL.RawQuery = params.Encode()
+	u.RawQuery = params.Encode()
 }
 
 func generateKey(u *url.URL, host string) string {

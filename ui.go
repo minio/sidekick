@@ -29,9 +29,7 @@ import (
 	"github.com/rivo/tview"
 )
 
-var (
-	app *tview.Application
-)
+var app *tview.Application
 
 type nodesView struct {
 	*tview.Table
@@ -50,7 +48,8 @@ func initNodesTable() *nodesView {
 	t.SetBorderColor(tcell.ColorTeal)
 	t.SetBordersColor(tcell.ColorTeal)
 
-	header := []string{"SITE",
+	header := []string{
+		"SITE",
 		"HOST",
 		"STATUS",
 		"CALLS",
@@ -60,7 +59,8 @@ func initNodesTable() *nodesView {
 		"TOTAL DOWNTIME",
 		"LAST DOWNTIME",
 		"MIN LATENCY",
-		"MAX LATENCY"}
+		"MAX LATENCY",
+	}
 
 	return &nodesView{t, header}
 }
@@ -111,8 +111,7 @@ func initUI(m *multisite) {
 				os.Exit(0)
 			}
 			if k == tcell.KeyRune {
-				switch event.Rune() {
-				case 'q':
+				if event.Rune() == 'q' {
 					app.Stop()
 					os.Exit(0)
 				}
@@ -128,6 +127,7 @@ func initUI(m *multisite) {
 		return
 	}
 }
+
 func (n *nodesView) getStylizedCell(backends []*Backend, row, col int, header bool) *tview.TableCell {
 	var cell *tview.TableCell
 	maxEndpointWidth := 0
