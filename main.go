@@ -52,7 +52,7 @@ var version = "0.0.0-dev"
 
 const (
 	slashSeparator  = "/"
-	healthCheckPath = "/v1/health"
+	healthCheckPath = "/minio/health/cluster/custom/disk"
 )
 
 var (
