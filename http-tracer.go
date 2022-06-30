@@ -315,7 +315,7 @@ func doTrace(trace TraceInfo, backend *Backend) {
 		return
 	}
 
-	if globalTrace == "minio" && strings.Contains(backend.healthCheckURL, st.Path) {
+	if globalTrace == "minio" && !strings.Contains(backend.healthCheckURL, st.Path) {
 		return
 	}
 
