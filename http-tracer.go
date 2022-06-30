@@ -50,7 +50,11 @@ type recordRequest struct {
 const timeFormat = "15:04:05.000"
 
 func (r *recordRequest) Read(p []byte) (n int, err error) {
-	n, err = r.Reader.Read(p)
+	if r.Reader == nil {
+		n, err = 0, io.EOF
+	} else {
+		n, err = r.Reader.Read(p)
+	}
 	r.bytesRead += n
 
 	if r.logBody {
@@ -311,7 +315,7 @@ func doTrace(trace TraceInfo, backend *Backend) {
 		return
 	}
 
-	if globalTrace == "minio" && st.Path != backend.healthCheckPath {
+	if globalTrace == "minio" && strings.Contains(backend.healthCheckURL, st.Path) {
 		return
 	}
 

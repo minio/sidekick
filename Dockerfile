@@ -1,4 +1,4 @@
-FROM golang:1.17.6
+FROM golang:1.18
 
 ADD go.mod /go/src/github.com/minio/sidekick/go.mod
 ADD go.sum /go/src/github.com/minio/sidekick/go.sum

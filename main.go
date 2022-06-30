@@ -1,4 +1,4 @@
-// Copyright (c) 2021 MinIO, Inc.
+// Copyright (c) 2021-2022 MinIO, Inc.
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -51,8 +51,8 @@ import (
 var version = "0.0.0-dev"
 
 const (
-	slashSeparator  = "/"
-	healthCheckPath = "/v1/health"
+	slashSeparator = "/"
+	healthPath     = "/v1/health"
 )
 
 var (
@@ -140,8 +140,7 @@ type Backend struct {
 	proxy               *httputil.ReverseProxy
 	httpClient          *http.Client
 	up                  int32
-	healthCheckPath     string
-	healthCheckPort     int
+	healthCheckURL      string
 	healthCheckDuration time.Duration
 	Stats               *BackendStats
 	cacheClient         *S3CacheClient
@@ -215,45 +214,30 @@ const (
 
 // getHealthCheckURL - extracts the health check URL.
 func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) (string, error) {
-	healthCheckURL, err := url.ParseRequestURI(strings.TrimSuffix(endpoint, slashSeparator) + healthCheckPath)
+	u, err := url.Parse(strings.TrimSuffix(endpoint, slashSeparator) + healthCheckPath)
 	if err != nil {
 		return "", fmt.Errorf("invalid endpoint %q and health check path %q: %s", endpoint, healthCheckPath, err)
 	}
 
 	if healthCheckPort == 0 {
-		return healthCheckURL.String(), nil
+		return u.String(), nil
 	}
 
-	// Validate port range which should be in [0, 65535]
-	if healthCheckPort < portLowerLimit || healthCheckPort > portUpperLimit {
-		return "", fmt.Errorf("invalid health check port \"%d\": must be in [0, 65535]", healthCheckPort)
-	}
+	// Set healthcheck port
+	u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(healthCheckPort))
 
-	// Set health check port
-	healthCheckURL.Host = net.JoinHostPort(healthCheckURL.Hostname(), strconv.Itoa(healthCheckPort))
-
-	return healthCheckURL.String(), nil
+	return u.String(), nil
 }
 
 // healthCheck - background routine which checks if a backend is up or down.
 func (b *Backend) healthCheck() {
-	healthCheckURL, err := getHealthCheckURL(b.endpoint, b.healthCheckPath, b.healthCheckPort)
+	req, err := http.NewRequest(http.MethodGet, b.healthCheckURL, nil)
 	if err != nil {
 		console.Fatalln(err)
 	}
 
 	for {
 		reqTime := time.Now().UTC()
-		req, err := http.NewRequest(http.MethodGet, healthCheckURL, nil)
-		if err != nil {
-			if globalLoggingEnabled {
-				logMsg(logMessage{Endpoint: b.endpoint, Error: err})
-			}
-			b.setOffline()
-			time.Sleep(b.healthCheckDuration)
-			continue
-		}
-
 		resp, err := b.httpClient.Do(req)
 		respTime := time.Now().UTC()
 		if err == nil {
@@ -340,7 +324,7 @@ func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Server", "SideKick") // indicate sidekick is serving the request
 	for _, s := range m.sites {
 		if s.Online() {
-			if r.URL.Path == healthCheckPath {
+			if r.URL.Path == healthPath {
 				// Health check endpoint should return success
 				return
 			}
@@ -620,21 +604,20 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 			Director: func(r *http.Request) {
 				r.Header.Add("X-Forwarded-Host", r.Host)
 				r.Header.Add("X-Real-IP", r.RemoteAddr)
-
-				if target.Scheme == "https" {
-					r.URL.Scheme = "https"
-				} else {
-					r.URL.Scheme = "http"
-				}
+				r.URL.Scheme = target.Scheme
 				r.URL.Host = target.Host
 			},
 			Transport: transport,
 		}
 
 		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0}
+		healthCheckURL, err := getHealthCheckURL(endpoint, healthCheckPath, healthCheckPort)
+		if err != nil {
+			console.Fatalln(err)
+		}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckPath, healthCheckPort, healthCheckDuration, &stats, newCacheClient(ctx, cacheCfg)}
+		}, 0, healthCheckURL, healthCheckDuration, &stats, newCacheClient(ctx, cacheCfg)}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
@@ -660,6 +643,12 @@ func sidekickMain(ctx *cli.Context) {
 	healthCheckPort := ctx.GlobalInt("health-port")
 	healthCheckDuration := ctx.GlobalDuration("health-duration")
 	addr := ctx.GlobalString("address")
+
+	// Validate port range which should be in [0, 65535]
+	if healthCheckPort < portLowerLimit || healthCheckPort > portUpperLimit {
+		console.Fatalln(fmt.Errorf("invalid health check port \"%d\": must be in [0, 65535]", healthCheckPort))
+	}
+
 	globalLoggingEnabled = ctx.GlobalBool("log")
 	globalTrace = ctx.GlobalString("trace")
 	globalJSONEnabled = ctx.GlobalBool("json")
