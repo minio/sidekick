@@ -44,6 +44,7 @@ import (
 	"github.com/minio/cli"
 	"github.com/minio/pkg/console"
 	"github.com/minio/pkg/ellipses"
+	xnet "github.com/minio/pkg/net"
 )
 
 // Use e.g.: go build -ldflags "-X main.version=v1.0.0"
@@ -214,13 +215,18 @@ const (
 
 // getHealthCheckURL - extracts the health check URL.
 func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) (string, error) {
-	u, err := url.Parse(strings.TrimSuffix(endpoint, slashSeparator) + healthCheckPath)
+	u, err := xnet.ParseHTTPURL(strings.TrimSuffix(endpoint, slashSeparator) + healthCheckPath)
 	if err != nil {
 		return "", fmt.Errorf("invalid endpoint %q and health check path %q: %s", endpoint, healthCheckPath, err)
 	}
 
 	if healthCheckPort == 0 {
 		return u.String(), nil
+	}
+
+	// Validate port range which should be in [0, 65535]
+	if healthCheckPort < portLowerLimit || healthCheckPort > portUpperLimit {
+		return "", fmt.Errorf("invalid health check port \"%d\": must be in [0, 65535]", healthCheckPort)
 	}
 
 	// Set healthcheck port
