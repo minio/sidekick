@@ -2,6 +2,8 @@
 
 ![build](https://github.com/minio/sidekick/workflows/Go/badge.svg) ![license](https://img.shields.io/badge/license-AGPL%20V3-blue)
 
+![GitHub Downloads][gh-downloads]
+
 *sidekick* is a high-performance sidecar load-balancer. By attaching a tiny load balancer as a sidecar to each of the client application processes, you can eliminate the centralized loadbalancer bottleneck and DNS failover management. *sidekick* automatically avoids sending traffic to the failed servers by checking their health via the readiness API and HTTP error returns.
 
 # Architecture
@@ -319,3 +321,5 @@ kubectl logs -f --namespace spark-operator spark-minio-app-driver spark-kubernet
 - GET requests with Range headers are not cached to keep the codebase simple.
 
 - Health-Check: Health check is provided at the path "/v1/health". It returns "200 OK" even if any one of the sites is reachable, else it returns "502 Bad Gateway" error.
+
+[gh-downloads]: https://img.shields.io/github/downloads/minio/sidekick/total?color=pink&label=GitHub%20Downloads
