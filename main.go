@@ -28,6 +28,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/http/pprof"
 	"net/url"
 	"os"
 	"strconv"
@@ -68,6 +69,10 @@ var (
 )
 
 const (
+	reservedPath  = "/minio"
+	profilingPath = reservedPath + "/pprof"
+
+	// TODO: replace /.prometheus with /minio/prometheus/metrics
 	prometheusMetricsPath = "/.prometheus/metrics"
 )
 
@@ -205,6 +210,21 @@ func registerMetricsRouter(router *mux.Router) error {
 		return err
 	}
 	router.Handle(prometheusMetricsPath, handler)
+	return nil
+}
+
+// registerProfilingRouter - add handler functions for profiling.
+// supported profiling:
+//
+//	e.g. go tool pprof http://localhost:8080/minio/pprof/profile?seconds=20 for CPU profiling
+func registerProfilingRouter(router *mux.Router) error {
+	for _, profilerName := range []string{"goroutine", "threadcreate", "heap", "allocs", "block", "mutex"} {
+		router.Handle(profilingPath+"/"+profilerName, pprof.Handler(profilerName))
+	}
+
+	router.Handle(profilingPath+"/profile", http.HandlerFunc(pprof.Profile))
+	router.Handle(profilingPath+"/symbol", http.HandlerFunc(pprof.Symbol))
+	router.Handle(profilingPath+"/trace", http.HandlerFunc(pprof.Trace))
 	return nil
 }
 
@@ -691,6 +711,9 @@ func sidekickMain(ctx *cli.Context) {
 	}
 
 	router := mux.NewRouter().SkipClean(true).UseEncodedPath()
+
+	registerProfilingRouter(router)
+
 	if err := registerMetricsRouter(router); err != nil {
 		console.Fatalln(err)
 	}
