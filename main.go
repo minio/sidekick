@@ -280,7 +280,7 @@ func (b *Backend) healthCheck() {
 		}
 		if globalTrace != "application" {
 			if resp != nil {
-				httpInternalTrace(req, resp, reqTime, respTime, b)
+				traceHealthCheckReq(req, resp, reqTime, respTime, b)
 			}
 		}
 		time.Sleep(b.healthCheckDuration)

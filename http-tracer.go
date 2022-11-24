@@ -177,7 +177,7 @@ func (r *recordRequest) Data() []byte {
 	return BodyPlaceHolder
 }
 
-func httpInternalTrace(req *http.Request, resp *http.Response, reqTime, respTime time.Time, backend *Backend) {
+func traceHealthCheckReq(req *http.Request, resp *http.Response, reqTime, respTime time.Time, backend *Backend) {
 	ti := InternalTrace(req, resp, reqTime, respTime)
 	doTrace(ti, backend)
 }
@@ -197,13 +197,6 @@ func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime tim
 	for _, enc := range req.TransferEncoding {
 		reqHeaders.Add("Transfer-Encoding", enc)
 	}
-	reqBodyRecorder := &recordRequest{Reader: req.Body, logBody: false, headers: reqHeaders}
-	req.Body = ioutil.NopCloser(reqBodyRecorder)
-	respBodyStr := "<BODY>"
-	if resp.Body != nil {
-		respBody, _ := ioutil.ReadAll(resp.Body)
-		respBodyStr = string(respBody)
-	}
 
 	rq := traceRequestInfo{
 		Time:     reqTime,
@@ -212,13 +205,11 @@ func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime tim
 		RawQuery: req.URL.RawQuery,
 		Client:   getSourceIP(req),
 		Headers:  reqHeaders,
-		Body:     string(reqBodyRecorder.Data()),
 	}
 	rs := traceResponseInfo{
 		Time:       respTime,
 		Headers:    resp.Header.Clone(),
 		StatusCode: resp.StatusCode,
-		Body:       respBodyStr,
 	}
 	if rs.StatusCode == 0 {
 		rs.StatusCode = http.StatusOK
@@ -229,9 +220,8 @@ func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime tim
 
 	t.CallStats = traceCallStats{
 		Latency: rs.Time.Sub(rq.Time),
-		Rx:      reqBodyRecorder.Size(),
-		Tx:      len(rs.Body),
 	}
+
 	t.Type = TraceMsgType
 	if globalDebugEnabled {
 		t.Type = DebugMsgType
