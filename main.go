@@ -819,7 +819,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "pprof",
-			Usage: "start and and listen on the specified address (e.g. `:6060`)",
+			Usage: "start and listen for profiling on the specified address (e.g. `:1337`)",
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
