@@ -28,6 +28,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/http/pprof"
 	"net/url"
 	"os"
 	"strconv"
@@ -69,6 +70,7 @@ var (
 
 const (
 	prometheusMetricsPath = "/.prometheus/metrics"
+	profilingPath         = "/.pprof"
 )
 
 func init() {
@@ -206,6 +208,24 @@ func registerMetricsRouter(router *mux.Router) error {
 	}
 	router.Handle(prometheusMetricsPath, handler)
 	return nil
+}
+
+// A blocking call to setup a new web API for pprof - the web API
+// can be consumed with go tool pprof command:
+//
+//	e.g. go tool pprof http://localhost:6060/minio/.profile?seconds=20 for CPU profiling
+func listenAndServePProf(addr string) error {
+	router := mux.NewRouter()
+
+	for _, profilerName := range []string{"goroutine", "threadcreate", "heap", "allocs", "block", "mutex"} {
+		router.Handle(profilingPath+"/"+profilerName, pprof.Handler(profilerName))
+	}
+
+	router.Handle(profilingPath+"/profile", http.HandlerFunc(pprof.Profile))
+	router.Handle(profilingPath+"/symbol", http.HandlerFunc(pprof.Symbol))
+	router.Handle(profilingPath+"/trace", http.HandlerFunc(pprof.Trace))
+
+	return http.ListenAndServe(addr, router)
 }
 
 const (
@@ -690,10 +710,19 @@ func sidekickMain(ctx *cli.Context) {
 		console.Infof("listening on '%s'\n", addr)
 	}
 
+	if pprofAddr := ctx.String("pprof"); pprofAddr != "" {
+		go func() {
+			if err := listenAndServePProf(pprofAddr); err != nil {
+				console.Fatalln(err)
+			}
+		}()
+	}
+
 	router := mux.NewRouter().SkipClean(true).UseEncodedPath()
 	if err := registerMetricsRouter(router); err != nil {
 		console.Fatalln(err)
 	}
+
 	router.PathPrefix(slashSeparator).Handler(m)
 	if ctx.String("cert") != "" && ctx.String("key") != "" {
 		if err := http.ListenAndServeTLS(addr, ctx.String("cert"), ctx.String("key"), router); err != nil {
@@ -787,6 +816,10 @@ func main() {
 		cli.StringFlag{
 			Name:  "key",
 			Usage: "server private key file",
+		},
+		cli.StringFlag{
+			Name:  "pprof",
+			Usage: "start and listen for profiling on the specified address (e.g. `:1337`)",
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
