@@ -3,7 +3,7 @@ Description=Sidekick
 Documentation=https://github.com/minio/sidekick/blob/master/README.md
 Wants=network-online.target
 After=network-online.target
-AssertFileIsExecutable=/usr/local/bin/sidekick
+AssertFileIsExecutable=/usr/bin/sidekick
 
 [Service]
 User=nobody
@@ -11,7 +11,7 @@ Group=nogroup
 
 EnvironmentFile=/etc/default/sidekick
 
-ExecStart=/usr/local/bin/sidekick $SIDEKICK_OPTIONS $SIDEKICK_SITES
+ExecStart=/usr/bin/sidekick $SIDEKICK_OPTIONS $SIDEKICK_SITES
 
 # Let systemd restart this service always
 Restart=always
