@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -191,10 +192,11 @@ type BackendStats struct {
 }
 
 // ErrorHandler called by httputil.ReverseProxy for errors.
+// Avoid canceled context error since it means the client disconnected.
 func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		if globalLoggingEnabled {
-			logMsg(logMessage{Endpoint: b.endpoint, Error: err})
+			logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
 		}
 		b.setOffline()
 	}
