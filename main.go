@@ -257,54 +257,68 @@ func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) (s
 
 // healthCheck - background routine which checks if a backend is up or down.
 func (b *Backend) healthCheck() {
-	req, err := http.NewRequest(http.MethodGet, b.healthCheckURL, nil)
-	if err != nil {
-		console.Fatalln(err)
-	}
-
 	for {
-		reqTime := time.Now().UTC()
-		resp, err := b.httpClient.Do(req)
-		respTime := time.Now().UTC()
-		if err == nil {
-			// Drain the connection.
-			io.Copy(ioutil.Discard, resp.Body)
-			resp.Body.Close()
+		err := b.doHealthCheck()
+		if err != nil {
+			console.Fatalln(err)
 		}
-		if err != nil || (err == nil && resp.StatusCode != http.StatusOK) {
-			if globalLoggingEnabled && (!b.Online() || b.Stats.UpSince.IsZero()) {
-				logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
-			}
-			// observed an error, take the backend down.
-			b.setOffline()
-			if b.Stats.DowntimeStart.IsZero() {
-				b.Stats.DowntimeStart = time.Now().UTC()
-			}
-		} else {
-			var downtimeEnd time.Time
-			if !b.Stats.DowntimeStart.IsZero() {
-				now := time.Now().UTC()
-				b.updateDowntime(now.Sub(b.Stats.DowntimeStart))
-				downtimeEnd = now
-			}
-			if globalLoggingEnabled && !b.Online() && !b.Stats.UpSince.IsZero() {
-				logMsg(logMessage{
-					Endpoint:         b.endpoint,
-					Status:           "up",
-					DowntimeDuration: downtimeEnd.Sub(b.Stats.DowntimeStart),
-				})
-			}
-			b.Stats.UpSince = time.Now().UTC()
-			b.Stats.DowntimeStart = time.Time{}
-			b.setOnline()
-		}
-		if globalTrace != "application" {
-			if resp != nil {
-				traceHealthCheckReq(req, resp, reqTime, respTime, b)
-			}
-		}
+
 		time.Sleep(b.healthCheckDuration)
 	}
+}
+
+func (b *Backend) doHealthCheck() error {
+	// Set up a maximum timeout time for the healtcheck operation
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.healthCheckURL, nil)
+	if err != nil {
+		return err
+	}
+
+	reqTime := time.Now().UTC()
+	resp, err := b.httpClient.Do(req)
+	respTime := time.Now().UTC()
+	if err == nil {
+		// Drain the connection.
+		io.Copy(ioutil.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	if err != nil || (err == nil && resp.StatusCode != http.StatusOK) {
+		if globalLoggingEnabled && (!b.Online() || b.Stats.UpSince.IsZero()) {
+			logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
+		}
+		// observed an error, take the backend down.
+		b.setOffline()
+		if b.Stats.DowntimeStart.IsZero() {
+			b.Stats.DowntimeStart = time.Now().UTC()
+		}
+	} else {
+		var downtimeEnd time.Time
+		if !b.Stats.DowntimeStart.IsZero() {
+			now := time.Now().UTC()
+			b.updateDowntime(now.Sub(b.Stats.DowntimeStart))
+			downtimeEnd = now
+		}
+		if globalLoggingEnabled && !b.Online() && !b.Stats.UpSince.IsZero() {
+			logMsg(logMessage{
+				Endpoint:         b.endpoint,
+				Status:           "up",
+				DowntimeDuration: downtimeEnd.Sub(b.Stats.DowntimeStart),
+			})
+		}
+		b.Stats.UpSince = time.Now().UTC()
+		b.Stats.DowntimeStart = time.Time{}
+		b.setOnline()
+	}
+	if globalTrace != "application" {
+		if resp != nil {
+			traceHealthCheckReq(req, resp, reqTime, respTime, b)
+		}
+	}
+
+	return nil
 }
 
 func (b *Backend) updateDowntime(downtime time.Duration) {
