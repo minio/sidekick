@@ -549,7 +549,7 @@ func isFresh(cacheCC, reqCC *cacheControl, lastModified time.Time) bool {
 	return freshCache && freshReq
 }
 
-func cacheHandler(w http.ResponseWriter, r *http.Request, b *Backend) http.HandlerFunc {
+func cacheHandler(b *Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		clnt := b.cacheClient
 		if clnt == nil || !clnt.isCacheable(r.Method) || !clnt.isOnline() {

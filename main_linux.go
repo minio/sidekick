@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func setTCPParameters(network, address string, c syscall.RawConn) error {
+func setTCPParameters(_, _ string, c syscall.RawConn) error {
 	c.Control(func(fdPtr uintptr) {
 		// got socket file descriptor to set parameters.
 		fd := int(fdPtr)

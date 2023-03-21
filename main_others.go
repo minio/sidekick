@@ -20,6 +20,6 @@ package main
 
 import "syscall"
 
-func setTCPParameters(network, address string, c syscall.RawConn) error {
+func setTCPParameters(_, _ string, _ syscall.RawConn) error {
 	return nil
 }
