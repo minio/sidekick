@@ -193,7 +193,7 @@ type BackendStats struct {
 
 // ErrorHandler called by httputil.ReverseProxy for errors.
 // Avoid canceled context error since it means the client disconnected.
-func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
+func (b *Backend) ErrorHandler(_ http.ResponseWriter, _ *http.Request, err error) {
 	if err != nil && !errors.Is(err, context.Canceled) {
 		if globalLoggingEnabled {
 			logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
@@ -418,7 +418,7 @@ func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if backend != nil && backend.Online() {
 		cacheHandlerFn := func(w http.ResponseWriter, r *http.Request) {
 			if backend.cacheClient != nil {
-				cacheHandler(w, r, backend)(w, r)
+				cacheHandler(backend)(w, r)
 			} else {
 				backend.proxy.ServeHTTP(w, r)
 			}
@@ -589,6 +589,34 @@ func checkMain(ctx *cli.Context) {
 	}
 }
 
+func modifyResponse() func(*http.Response) error {
+	return func(resp *http.Response) error {
+		resp.Header.Set("X-Proxy", "true")
+		return nil
+	}
+}
+
+type bufPool struct {
+	pool sync.Pool
+}
+
+func (b *bufPool) Put(buf []byte) {
+	b.pool.Put(buf)
+}
+
+func (b *bufPool) Get() []byte {
+	return b.pool.Get().([]byte)
+}
+
+func newBufPool(sz int) httputil.BufferPool {
+	return &bufPool{pool: sync.Pool{
+		New: func() interface{} {
+			buf := make([]byte, sz)
+			return buf
+		},
+	}}
+}
+
 func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration time.Duration) *site {
 	var endpoints []string
 
@@ -649,9 +677,10 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 				r.URL.Scheme = target.Scheme
 				r.URL.Host = target.Host
 			},
-			Transport: transport,
+			Transport:      transport,
+			BufferPool:     newBufPool(128 << 10),
+			ModifyResponse: modifyResponse(),
 		}
-
 		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0}
 		healthCheckURL, err := getHealthCheckURL(endpoint, healthCheckPath, healthCheckPort)
 		if err != nil {
