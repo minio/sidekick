@@ -23,6 +23,7 @@ linters:
     - gofumpt
     - tenv
     - durationcheck
+    - staticcheck
 
 issues:
   exclude-use-default: false
