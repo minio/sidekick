@@ -147,7 +147,6 @@ type Backend struct {
 	healthCheckURL      string
 	healthCheckDuration time.Duration
 	Stats               *BackendStats
-	cacheClient         *S3CacheClient
 }
 
 const (
@@ -416,15 +415,7 @@ func (s *site) nextProxy() *Backend {
 func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := s.nextProxy()
 	if backend != nil && backend.Online() {
-		cacheHandlerFn := func(w http.ResponseWriter, r *http.Request) {
-			if backend.cacheClient != nil {
-				cacheHandler(backend)(w, r)
-			} else {
-				backend.proxy.ServeHTTP(w, r)
-			}
-		}
-
-		httpTraceHdrs(cacheHandlerFn, w, r, backend)
+		httpTraceHdrs(backend.proxy.ServeHTTP, w, r, backend)
 		return
 	}
 	w.WriteHeader(http.StatusBadGateway)
@@ -585,7 +576,7 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 
 func checkMain(ctx *cli.Context) {
 	if !ctx.Args().Present() {
-		console.Fatalln(fmt.Errorf("not arguments found, please check documentation '%s --help'", ctx.App.Name))
+		cli.ShowCommandHelpAndExit(ctx, ctx.Command.Name, 1)
 	}
 }
 
@@ -639,7 +630,6 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 		endpoints = siteStrs
 	}
 
-	cacheCfg := newCacheConfig()
 	var backends []*Backend
 	var prevScheme string
 	var transport http.RoundTripper
@@ -689,7 +679,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 		}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckURL, healthCheckDuration, &stats, newCacheClient(ctx, cacheCfg)}
+		}, 0, healthCheckURL, healthCheckDuration, &stats}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
@@ -901,7 +891,6 @@ EXAMPLES:
 
   6. Sidekick as TLS terminator:
      $ sidekick --cert public.crt --key private.key --health-path=/minio/health/cluster http://site1-minio{1...4}:9000
-
 `
 	app.Action = sidekickMain
 	app.Run(os.Args)
