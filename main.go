@@ -32,6 +32,7 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +68,7 @@ var (
 	globalConsoleDisplay bool
 	globalConnStats      []*ConnStats
 	log2                 *logrus.Logger
+	globalClientIP       string
 )
 
 const (
@@ -609,6 +611,81 @@ func newBufPool(sz int) httputil.BufferPool {
 	}}
 }
 
+type byLastOctetValue []net.IP
+
+func (n byLastOctetValue) Len() int      { return len(n) }
+func (n byLastOctetValue) Swap(i, j int) { n[i], n[j] = n[j], n[i] }
+func (n byLastOctetValue) Less(i, j int) bool {
+	// This case is needed when all ips in the list
+	// have same last octets, Following just ensures that
+	// 127.0.0.1 is moved to the end of the list.
+	if n[i].IsLoopback() {
+		return false
+	}
+	if n[j].IsLoopback() {
+		return true
+	}
+	return []byte(n[i].To4())[3] > []byte(n[j].To4())[3]
+}
+
+// sortIPs - sort ips based on higher octects.
+// The logic to sort by last octet is implemented to
+// prefer CIDRs with higher octects, this in-turn skips the
+// localhost/loopback address to be not preferred as the
+// first ip on the list. Subsequently this list helps us print
+// a user friendly message with appropriate values.
+func sortIPs(ipList []string) []string {
+	if len(ipList) == 1 {
+		return ipList
+	}
+
+	var ipV4s []net.IP
+	var nonIPs []string
+	for _, ip := range ipList {
+		nip := net.ParseIP(ip)
+		if nip != nil {
+			ipV4s = append(ipV4s, nip)
+		} else {
+			nonIPs = append(nonIPs, ip)
+		}
+	}
+
+	sort.Sort(byLastOctetValue(ipV4s))
+
+	var ips []string
+	for _, ip := range ipV4s {
+		ips = append(ips, ip.String())
+	}
+
+	return append(nonIPs, ips...)
+}
+
+func getPublicIP() string {
+	if globalClientIP != "" {
+		return globalClientIP
+	}
+	var IPs []string
+	addrs, _ := net.InterfaceAddrs()
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+			IPs = append(IPs, ipNet.IP.String())
+		}
+	}
+	globalClientIP = sortIPs(IPs)[0] // There would be at least one entry
+	return globalClientIP
+}
+
+func getHost(r *http.Request) string {
+	publicIP := getPublicIP()
+	return fmt.Sprintf("%s:%s", publicIP, r.Host[strings.Index(r.Host, ":")+1:])
+}
+
+func getRemoteAddr(r *http.Request) string {
+	publicIP := getPublicIP()
+	return fmt.Sprintf("%s:%s", publicIP, r.RemoteAddr[strings.Index(r.RemoteAddr, ":")+1:])
+}
+
 func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration time.Duration) *site {
 	var endpoints []string
 
@@ -663,8 +740,14 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 
 		proxy := &httputil.ReverseProxy{
 			Director: func(r *http.Request) {
-				r.Header.Add("X-Forwarded-Host", r.Host)
-				r.Header.Add("X-Real-IP", r.RemoteAddr)
+				if strings.HasPrefix(r.RemoteAddr, "localhost") || strings.HasPrefix(r.RemoteAddr, "127.0.0.1") {
+					r.Header.Add("X-Forwarded-Host", getHost(r))
+					r.Header.Add("X-Real-IP", getRemoteAddr(r))
+					r.Header.Add("X-Forwarded-For", globalClientIP)
+				} else {
+					r.Header.Add("X-Forwarded-Host", r.Host)
+					r.Header.Add("X-Real-IP", r.RemoteAddr)
+				}
 				r.URL.Scheme = target.Scheme
 				r.URL.Host = target.Host
 			},
