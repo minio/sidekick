@@ -68,9 +68,6 @@ var (
 	globalConsoleDisplay bool
 	globalConnStats      []*ConnStats
 	log2                 *logrus.Logger
-	globalClientIP       string
-	globalForwardedHost  string
-	globalRealIP         string
 )
 
 const (
@@ -613,23 +610,6 @@ func newBufPool(sz int) httputil.BufferPool {
 	}}
 }
 
-type byLastOctetValue []net.IP
-
-func (n byLastOctetValue) Len() int      { return len(n) }
-func (n byLastOctetValue) Swap(i, j int) { n[i], n[j] = n[j], n[i] }
-func (n byLastOctetValue) Less(i, j int) bool {
-	// This case is needed when all ips in the list
-	// have same last octets, Following just ensures that
-	// 127.0.0.1 is moved to the end of the list.
-	if n[i].IsLoopback() {
-		return false
-	}
-	if n[j].IsLoopback() {
-		return true
-	}
-	return []byte(n[i].To4())[3] > []byte(n[j].To4())[3]
-}
-
 // sortIPs - sort ips based on higher octects.
 // The logic to sort by last octet is implemented to
 // prefer CIDRs with higher octects, this in-turn skips the
@@ -652,7 +632,18 @@ func sortIPs(ipList []string) []string {
 		}
 	}
 
-	sort.Sort(byLastOctetValue(ipV4s))
+	sort.Slice(ipV4s, func(i, j int) bool {
+		// This case is needed when all ips in the list
+		// have same last octets, Following just ensures that
+		// 127.0.0.1 is moved to the end of the list.
+		if ipV4s[i].IsLoopback() {
+			return false
+		}
+		if ipV4s[j].IsLoopback() {
+			return true
+		}
+		return []byte(ipV4s[i].To4())[3] > []byte(ipV4s[j].To4())[3]
+	})
 
 	var ips []string
 	for _, ip := range ipV4s {
@@ -663,9 +654,6 @@ func sortIPs(ipList []string) []string {
 }
 
 func getPublicIP() string {
-	if globalClientIP != "" {
-		return globalClientIP
-	}
 	var IPs []string
 	addrs, _ := net.InterfaceAddrs()
 	for _, addr := range addrs {
@@ -674,25 +662,7 @@ func getPublicIP() string {
 			IPs = append(IPs, ipNet.IP.String())
 		}
 	}
-	globalClientIP = sortIPs(IPs)[0] // There would be at least one entry
-	return globalClientIP
-}
-
-func getForwardedFor(r *http.Request) string {
-	if globalForwardedHost != "" {
-		return globalForwardedHost
-	}
-	publicIP := getPublicIP()
-	_, port, _ := net.SplitHostPort(r.Host)
-	return fmt.Sprintf("%s:%s", publicIP, port)
-}
-
-func getRealIP() string {
-	if globalRealIP != "" {
-		return globalRealIP
-	}
-	globalRealIP = getPublicIP()
-	return globalRealIP
+	return sortIPs(IPs)[0] // There would be at least one entry
 }
 
 // IsLoopback - returns true if given IP is a loopback
@@ -758,17 +728,18 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 		if transport == nil {
 			transport = clientTransport(ctx, target.Scheme == "https")
 		}
-
+		// this is only used if r.RemoteAddr is localhost which means that
+		// sidekick endpoint being accessed is 127.0.0.x
+		realIP := getPublicIP()
 		proxy := &httputil.ReverseProxy{
 			Director: func(r *http.Request) {
 				r.Header.Add("X-Forwarded-Host", r.Host)
-				if IsLoopback(r.RemoteAddr) {
-					r.Header.Add("X-Real-IP", getRealIP())
-					r.Header.Add("X-Forwarded-For", getForwardedFor(r))
-				} else {
-					host, _, _ := net.SplitHostPort(r.RemoteAddr)
-					r.Header.Add("X-Real-IP", host)
+				host := realIP
+				if !IsLoopback(r.RemoteAddr) {
+					host, _, _ = net.SplitHostPort(r.RemoteAddr)
 				}
+				r.Header.Add("X-Real-IP", host)
+				r.Header.Add("X-Forwarded-For", host)
 				r.URL.Scheme = target.Scheme
 				r.URL.Host = target.Host
 			},
