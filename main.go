@@ -69,6 +69,8 @@ var (
 	globalConnStats      []*ConnStats
 	log2                 *logrus.Logger
 	globalClientIP       string
+	globalForwardedHost  string
+	globalRealIP         string
 )
 
 const (
@@ -676,14 +678,33 @@ func getPublicIP() string {
 	return globalClientIP
 }
 
-func getHost(r *http.Request) string {
+func getForwardedFor(r *http.Request) string {
+	if globalForwardedHost != "" {
+		return globalForwardedHost
+	}
 	publicIP := getPublicIP()
-	return fmt.Sprintf("%s:%s", publicIP, r.Host[strings.Index(r.Host, ":")+1:])
+	_, port, _ := net.SplitHostPort(r.Host)
+	return fmt.Sprintf("%s:%s", publicIP, port)
 }
 
-func getRemoteAddr(r *http.Request) string {
-	publicIP := getPublicIP()
-	return fmt.Sprintf("%s:%s", publicIP, r.RemoteAddr[strings.Index(r.RemoteAddr, ":")+1:])
+func getRealIP() string {
+	if globalRealIP != "" {
+		return globalRealIP
+	}
+	globalRealIP = getPublicIP()
+	return globalRealIP
+}
+
+// IsLoopback - returns true if given IP is a loopback
+func IsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	return net.ParseIP(host).IsLoopback()
 }
 
 func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration time.Duration) *site {
@@ -740,13 +761,13 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 
 		proxy := &httputil.ReverseProxy{
 			Director: func(r *http.Request) {
-				if strings.HasPrefix(r.RemoteAddr, "localhost") || strings.HasPrefix(r.RemoteAddr, "127.0.0.1") {
-					r.Header.Add("X-Forwarded-Host", getHost(r))
-					r.Header.Add("X-Real-IP", getRemoteAddr(r))
-					r.Header.Add("X-Forwarded-For", globalClientIP)
+				r.Header.Add("X-Forwarded-Host", r.Host)
+				if IsLoopback(r.RemoteAddr) {
+					r.Header.Add("X-Real-IP", getRealIP())
+					r.Header.Add("X-Forwarded-For", getForwardedFor(r))
 				} else {
-					r.Header.Add("X-Forwarded-Host", r.Host)
-					r.Header.Add("X-Real-IP", r.RemoteAddr)
+					host, _, _ := net.SplitHostPort(r.RemoteAddr)
+					r.Header.Add("X-Real-IP", host)
 				}
 				r.URL.Scheme = target.Scheme
 				r.URL.Host = target.Host
