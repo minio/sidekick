@@ -32,6 +32,7 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -609,6 +610,73 @@ func newBufPool(sz int) httputil.BufferPool {
 	}}
 }
 
+// sortIPs - sort ips based on higher octects.
+// The logic to sort by last octet is implemented to
+// prefer CIDRs with higher octects, this in-turn skips the
+// localhost/loopback address to be not preferred as the
+// first ip on the list. Subsequently this list helps us print
+// a user friendly message with appropriate values.
+func sortIPs(ipList []string) []string {
+	if len(ipList) == 1 {
+		return ipList
+	}
+
+	var ipV4s []net.IP
+	var nonIPs []string
+	for _, ip := range ipList {
+		nip := net.ParseIP(ip)
+		if nip != nil {
+			ipV4s = append(ipV4s, nip)
+		} else {
+			nonIPs = append(nonIPs, ip)
+		}
+	}
+
+	sort.Slice(ipV4s, func(i, j int) bool {
+		// This case is needed when all ips in the list
+		// have same last octets, Following just ensures that
+		// 127.0.0.1 is moved to the end of the list.
+		if ipV4s[i].IsLoopback() {
+			return false
+		}
+		if ipV4s[j].IsLoopback() {
+			return true
+		}
+		return []byte(ipV4s[i].To4())[3] > []byte(ipV4s[j].To4())[3]
+	})
+
+	var ips []string
+	for _, ip := range ipV4s {
+		ips = append(ips, ip.String())
+	}
+
+	return append(nonIPs, ips...)
+}
+
+func getPublicIP() string {
+	var IPs []string
+	addrs, _ := net.InterfaceAddrs()
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+			IPs = append(IPs, ipNet.IP.String())
+		}
+	}
+	return sortIPs(IPs)[0] // There would be at least one entry
+}
+
+// IsLoopback - returns true if given IP is a loopback
+func IsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	return net.ParseIP(host).IsLoopback()
+}
+
 func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration time.Duration) *site {
 	var endpoints []string
 
@@ -660,11 +728,18 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 		if transport == nil {
 			transport = clientTransport(ctx, target.Scheme == "https")
 		}
-
+		// this is only used if r.RemoteAddr is localhost which means that
+		// sidekick endpoint being accessed is 127.0.0.x
+		realIP := getPublicIP()
 		proxy := &httputil.ReverseProxy{
 			Director: func(r *http.Request) {
 				r.Header.Add("X-Forwarded-Host", r.Host)
-				r.Header.Add("X-Real-IP", r.RemoteAddr)
+				host := realIP
+				if !IsLoopback(r.RemoteAddr) {
+					host, _, _ = net.SplitHostPort(r.RemoteAddr)
+				}
+				r.Header.Add("X-Real-IP", host)
+				r.Header.Add("X-Forwarded-For", host)
 				r.URL.Scheme = target.Scheme
 				r.URL.Host = target.Host
 			},
