@@ -40,7 +40,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/rs/dnscache"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
@@ -472,8 +471,8 @@ func getCertKeyPair(cert, key string) []tls.Certificate {
 	return []tls.Certificate{keyPair}
 }
 
-// dialContextWithDNSCache is a helper function which returns `net.DialContext` function.
-// It randomly fetches an IP from the DNS cache and dials it by the given dial
+// dialContextWithoutDNSCache is a helper function which returns `net.DialContext` function.
+// It randomly fetches an IP from the DNS and dials it by the given dial
 // function. It dials one by one and returns first connected `net.Conn`.
 // If it fails to dial all IPs from cache it returns first error. If no baseDialFunc
 // is given, it sets default dial function.
@@ -482,7 +481,7 @@ func getCertKeyPair(cert, key string) []tls.Certificate {
 //
 // In this function, it uses functions from `rand` package. To make it really random,
 // you MUST call `rand.Seed` and change the value from the default in your application
-func dialContextWithDNSCache(resolver *dnscache.Resolver, baseDialCtx DialContext) DialContext {
+func dialContextWithoutDNSCache(resolver *net.Resolver, baseDialCtx DialContext) DialContext {
 	if baseDialCtx == nil {
 		// This is same as which `http.DefaultTransport` uses.
 		baseDialCtx = (&net.Dialer{
@@ -517,9 +516,7 @@ func dialContextWithDNSCache(resolver *dnscache.Resolver, baseDialCtx DialContex
 	}
 }
 
-var dnsCache = &dnscache.Resolver{
-	Timeout: 5 * time.Second,
-}
+var dnsResolver = &net.Resolver{}
 
 // DialContext is a function to make custom Dial for internode communications
 type DialContext func(ctx context.Context, network, address string) (net.Conn, error)
@@ -541,7 +538,7 @@ const tlsClientSessionCacheSize = 100
 func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialContextWithDNSCache(dnsCache, newProxyDialContext(10*time.Second)),
+		DialContext:           dialContextWithoutDNSCache(dnsResolver, newProxyDialContext(10*time.Second)),
 		MaxIdleConnsPerHost:   1024,
 		WriteBufferSize:       32 << 10, // 32KiB moving up from 4KiB default
 		ReadBufferSize:        32 << 10, // 32KiB moving up from 4KiB default
