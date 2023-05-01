@@ -75,9 +75,33 @@ const (
 	profilingPath         = "/.pprof"
 )
 
+var dnsCache = &dnscache.Resolver{
+	Timeout: 5 * time.Second,
+}
+
 func init() {
 	// Create a new instance of the logger. You can have any number of instances.
 	log2 = logrus.New()
+
+	options := dnscache.ResolverRefreshOptions{
+		ClearUnused:      true,
+		PersistOnFailure: false,
+	}
+
+	// Call to refresh will refresh names in cache. If you pass true, it will also
+	// remove cached names not looked up since the last call to Refresh. It is a good idea
+	// to call this method on a regular interval.
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				dnsCache.RefreshWithOptions(options)
+			}
+		}
+	}()
+
 }
 
 func logMsg(msg logMessage) error {
@@ -515,10 +539,6 @@ func dialContextWithDNSCache(resolver *dnscache.Resolver, baseDialCtx DialContex
 
 		return
 	}
-}
-
-var dnsCache = &dnscache.Resolver{
-	Timeout: 5 * time.Second,
 }
 
 // DialContext is a function to make custom Dial for internode communications
