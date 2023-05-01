@@ -94,14 +94,10 @@ func init() {
 	go func() {
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				dnsCache.RefreshWithOptions(options)
-			}
+		for range t.C {
+			dnsCache.RefreshWithOptions(options)
 		}
 	}()
-
 }
 
 func logMsg(msg logMessage) error {
