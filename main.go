@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022 MinIO, Inc.
+// Copyright (c) 2021-2023 MinIO, Inc.
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -40,7 +40,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/rs/dnscache"
+	"github.com/minio/dnscache"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
@@ -82,22 +82,6 @@ var dnsCache = &dnscache.Resolver{
 func init() {
 	// Create a new instance of the logger. You can have any number of instances.
 	log2 = logrus.New()
-
-	options := dnscache.ResolverRefreshOptions{
-		ClearUnused:      true,
-		PersistOnFailure: false,
-	}
-
-	// Call to refresh will refresh names in cache. If you pass true, it will also
-	// remove cached names not looked up since the last call to Refresh. It is a good idea
-	// to call this method on a regular interval.
-	go func() {
-		t := time.NewTicker(30 * time.Second)
-		defer t.Stop()
-		for range t.C {
-			dnsCache.RefreshWithOptions(options)
-		}
-	}()
 }
 
 func logMsg(msg logMessage) error {
@@ -809,6 +793,15 @@ func sidekickMain(ctx *cli.Context) {
 	globalConsoleDisplay = globalLoggingEnabled || ctx.IsSet("trace") || !term.IsTerminal(int(os.Stdout.Fd()))
 	globalDebugEnabled = ctx.GlobalBool("debug")
 
+	go func() {
+		t := time.NewTicker(ctx.GlobalDuration("dns-ttl"))
+		defer t.Stop()
+
+		for range t.C {
+			dnsCache.Refresh()
+		}
+	}()
+
 	if !strings.HasPrefix(healthCheckPath, slashSeparator) {
 		healthCheckPath = slashSeparator + healthCheckPath
 	}
@@ -875,7 +868,7 @@ func main() {
 	app.Description = `High-Performance sidecar load-balancer`
 	app.UsageText = "[FLAGS] SITE1 [SITE2..]"
 	app.Version = version
-	app.Copyright = "(c) 2020-2021 MinIO, Inc."
+	app.Copyright = "(c) 2020-2023 MinIO, Inc."
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "address, a",
@@ -947,6 +940,11 @@ func main() {
 		cli.StringFlag{
 			Name:  "pprof",
 			Usage: "start and listen for profiling on the specified address (e.g. `:1337`)",
+		},
+		cli.DurationFlag{
+			Name:  "dns-ttl",
+			Usage: "choose custom DNS TTL value for DNS refreshes for load balanced endpoints",
+			Value: 10 * time.Minute,
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
