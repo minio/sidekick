@@ -33,7 +33,7 @@ minisign -Vm sidekick-<OS>-<ARCH> -P RWTx5Zr1tiHQLwG9keckT0c45M3AGeHD6IvimQHpyRy
 
 Pull the latest release via:
 ```
-docker pull minio/sidekick:v2.0.0
+docker pull minio/sidekick:v3.0.4
 ```
 
 ## Build from source
