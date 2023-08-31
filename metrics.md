@@ -76,8 +76,8 @@ Here `prometheus.yml` is the name of configuration file. You can now see Sidekic
 
 Sidekick loadbalancer exposes the following metrics on `/.prometheus/metrics` endpoint. All of these can be accessed via Prometheus dashboard.
 
-| Metrics Name              | Description                                                      |
-|:-------------------------:|:----------------------------------------------------------------:|
+| Metrics Name              | Description                                                         |
+|:-------------------------:|:-------------------------------------------------------------------:|
 | `sidekick_requests_total` | Total number of requests in current SideKick instance.              |
 | `sidekick_errors_total`   | Total number of errors in requests in current SideKick instance.    |
 | `sidekick_rx_bytes_total` | Total number of bytes received by current SideKick server instance. |

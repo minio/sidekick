@@ -15,8 +15,8 @@
 
 ## Binary Releases
 
-| OS      | ARCH    | Binary                                                                                       |
-|:-------:|:-------:|:--------------------------------------------------------------------------------------------:|
+| OS      | ARCH    | Binary                                                                                                 |
+|:-------:|:-------:|:------------------------------------------------------------------------------------------------------:|
 | Linux   | amd64   | [linux-amd64](https://github.com/minio/sidekick/releases/latest/download/sidekick-linux-amd64)         |
 | Linux   | arm64   | [linux-arm64](https://github.com/minio/sidekick/releases/latest/download/sidekick-linux-arm64)         |
 | Linux   | ppc64le | [linux-ppc64le](https://github.com/minio/sidekick/releases/latest/download/sidekick-linux-ppc64le)     |
