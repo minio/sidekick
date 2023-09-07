@@ -9,7 +9,7 @@ release:
 
 before:
   hooks:
-    - go mod tidy -compat=1.18
+    - go mod tidy -compat=1.19
 
 builds:
   -
@@ -66,52 +66,49 @@ changelog:
 
 dockers:
 - image_templates:
-  - "minio/sidekick:{{ .Tag }}-amd64"
+  - "quay.io/minio/sidekick:{{ .Tag }}-amd64"
   use: buildx
   dockerfile: Dockerfile.release
   extra_files:
     - LICENSE
     - CREDITS
+  goarch: amd64
   build_flag_templates:
   - "--platform=linux/amd64"
 - image_templates:
-  - "minio/sidekick:{{ .Tag }}-ppc64le"
+  - "quay.io/minio/sidekick:{{ .Tag }}-ppc64le"
   use: buildx
   dockerfile: Dockerfile.release
   extra_files:
     - LICENSE
     - CREDITS
+  goarch: ppc64le
   build_flag_templates:
   - "--platform=linux/ppc64le"
 - image_templates:
-  - "minio/sidekick:{{ .Tag }}-s390x"
+  - "quay.io/minio/sidekick:{{ .Tag }}-s390x"
   use: buildx
   dockerfile: Dockerfile.release
   extra_files:
     - LICENSE
     - CREDITS
+  goarch: s390x
   build_flag_templates:
   - "--platform=linux/s390x"
 - image_templates:
-  - "minio/sidekick:{{ .Tag }}-arm64"
+  - "quay.io/minio/sidekick:{{ .Tag }}-arm64"
   use: buildx
-  goarch: arm64
   dockerfile: Dockerfile.release
   extra_files:
     - LICENSE
     - CREDITS
+  goarch: arm64
   build_flag_templates:
   - "--platform=linux/arm64"
 docker_manifests:
-- name_template: minio/sidekick:{{ .Tag }}
+- name_template: quay.io/minio/sidekick:{{ .Tag }}
   image_templates:
-  - minio/sidekick:{{ .Tag }}-amd64
-  - minio/sidekick:{{ .Tag }}-arm64
-  - minio/sidekick:{{ .Tag }}-ppc64le
-  - minio/sidekick:{{ .Tag }}-s390x
-- name_template: minio/sidekick:latest
-  image_templates:
-  - minio/sidekick:{{ .Tag }}-amd64
-  - minio/sidekick:{{ .Tag }}-arm64
-  - minio/sidekick:{{ .Tag }}-ppc64le
-  - minio/sidekick:{{ .Tag }}-s390x
+  - quay.io/minio/sidekick:{{ .Tag }}-amd64
+  - quay.io/minio/sidekick:{{ .Tag }}-arm64
+  - quay.io/minio/sidekick:{{ .Tag }}-ppc64le
+  - quay.io/minio/sidekick:{{ .Tag }}-s390x
