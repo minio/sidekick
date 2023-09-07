@@ -28,7 +28,6 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"net/http/pprof"
 	"net/url"
 	"os"
@@ -40,14 +39,15 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/minio/dnscache"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
 	"github.com/minio/cli"
-	"github.com/minio/pkg/console"
-	"github.com/minio/pkg/ellipses"
-	xnet "github.com/minio/pkg/net"
+	"github.com/minio/dnscache"
+	"github.com/minio/pkg/v2/console"
+	"github.com/minio/pkg/v2/ellipses"
+	xnet "github.com/minio/pkg/v2/net"
+	"github.com/minio/sidekick/reverse"
 )
 
 // Use e.g.: go build -ldflags "-X main.version=v1.0.0"
@@ -146,7 +146,7 @@ func (l logMessage) String() string {
 type Backend struct {
 	siteNumber          int
 	endpoint            string
-	proxy               *httputil.ReverseProxy
+	proxy               *reverse.Proxy
 	httpClient          *http.Client
 	up                  int32
 	healthCheckURL      string
@@ -198,11 +198,30 @@ type BackendStats struct {
 // ErrorHandler called by httputil.ReverseProxy for errors.
 // Avoid canceled context error since it means the client disconnected.
 func (b *Backend) ErrorHandler(_ http.ResponseWriter, _ *http.Request, err error) {
-	if err != nil && !errors.Is(err, context.Canceled) {
-		if globalLoggingEnabled {
-			logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
+	if err != nil {
+		offline := true
+		for _, nerr := range []error{
+			context.Canceled,
+			io.EOF,
+			io.ErrClosedPipe,
+			io.ErrUnexpectedEOF,
+			errors.New("http: server closed idle connection"),
+		} {
+			if errors.Is(err, nerr) {
+				offline = false
+				break
+			}
+			if err.Error() == nerr.Error() {
+				offline = false
+				break
+			}
 		}
-		b.setOffline()
+		if offline {
+			if globalLoggingEnabled {
+				logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
+			}
+			b.setOffline()
+		}
 	}
 }
 
@@ -273,6 +292,14 @@ func (b *Backend) healthCheck() {
 	}
 }
 
+func drainBody(resp *http.Response) {
+	if resp != nil {
+		// Drain the connection.
+		io.Copy(ioutil.Discard, resp.Body)
+		resp.Body.Close()
+	}
+}
+
 func (b *Backend) doHealthCheck() error {
 	// Set up a maximum timeout time for the healtcheck operation
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -286,11 +313,7 @@ func (b *Backend) doHealthCheck() error {
 	reqTime := time.Now().UTC()
 	resp, err := b.httpClient.Do(req)
 	respTime := time.Now().UTC()
-	if err == nil {
-		// Drain the connection.
-		io.Copy(ioutil.Discard, resp.Body)
-		resp.Body.Close()
-	}
+	drainBody(resp)
 	if err != nil || (err == nil && resp.StatusCode != http.StatusOK) {
 		if globalLoggingEnabled && (!b.Online() || b.Stats.UpSince.IsZero()) {
 			logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
@@ -588,28 +611,6 @@ func modifyResponse() func(*http.Response) error {
 	}
 }
 
-type bufPool struct {
-	pool sync.Pool
-}
-
-func (b *bufPool) Put(buf []byte) {
-	b.pool.Put(&buf)
-}
-
-func (b *bufPool) Get() []byte {
-	bufp := b.pool.Get().(*[]byte)
-	return *bufp
-}
-
-func newBufPool(sz int) httputil.BufferPool {
-	return &bufPool{pool: sync.Pool{
-		New: func() interface{} {
-			buf := make([]byte, sz)
-			return &buf
-		},
-	}}
-}
-
 // sortIPs - sort ips based on higher octects.
 // The logic to sort by last octet is implemented to
 // prefer CIDRs with higher octects, this in-turn skips the
@@ -731,7 +732,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 		// this is only used if r.RemoteAddr is localhost which means that
 		// sidekick endpoint being accessed is 127.0.0.x
 		realIP := getPublicIP()
-		proxy := &httputil.ReverseProxy{
+		proxy := &reverse.Proxy{
 			Director: func(r *http.Request) {
 				r.Header.Add("X-Forwarded-Host", r.Host)
 				host := realIP
@@ -744,7 +745,6 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 				r.URL.Host = target.Host
 			},
 			Transport:      transport,
-			BufferPool:     newBufPool(128 << 10),
 			ModifyResponse: modifyResponse(),
 		}
 		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0}
