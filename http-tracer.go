@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -29,7 +28,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 
-	"github.com/minio/pkg/console"
+	"github.com/minio/pkg/v2/console"
 )
 
 // recordRequest - records the first recLen bytes
@@ -87,6 +86,7 @@ type ResponseWriter struct {
 	// Internal recording buffer
 	headers bytes.Buffer
 	body    bytes.Buffer
+
 	// Indicate if headers are written in the log
 	headersLogged bool
 }
@@ -178,17 +178,14 @@ func (r *recordRequest) Data() []byte {
 }
 
 func traceHealthCheckReq(req *http.Request, resp *http.Response, reqTime, respTime time.Time, backend *Backend) {
-	ti := InternalTrace(req, resp, reqTime, respTime)
+	ti := InternalTrace(req, resp, reqTime, respTime, backend.endpoint)
 	doTrace(ti, backend)
 }
 
 // InternalTrace returns trace for sidekick http requests
-func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime time.Time) TraceInfo {
+func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime time.Time, endpoint string) TraceInfo {
 	t := TraceInfo{}
-	t.NodeName = req.Host
-	if host, _, err := net.SplitHostPort(t.NodeName); err == nil {
-		t.NodeName = host
-	}
+	t.NodeName = endpoint
 	reqHeaders := req.Header.Clone()
 	reqHeaders.Set("Host", req.Host)
 	if len(req.TransferEncoding) == 0 {
@@ -245,10 +242,6 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 	t := TraceInfo{}
 	reqBodyRecorder = &recordRequest{Reader: r.Body, logBody: logBody, headers: reqHeaders}
 	r.Body = ioutil.NopCloser(reqBodyRecorder)
-	t.NodeName = r.Host
-	if host, _, err := net.SplitHostPort(t.NodeName); err == nil {
-		t.NodeName = host
-	}
 
 	rw := NewResponseWriter(w)
 	rw.LogBody = logBody
@@ -276,7 +269,6 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 
 	t.ReqInfo = rq
 	t.RespInfo = rs
-
 	t.NodeName = endpoint
 	t.CallStats = traceCallStats{
 		Latency:         rs.Time.Sub(rw.StartTime),
@@ -367,7 +359,7 @@ type shortTraceMsg struct {
 
 func (s shortTraceMsg) String() string {
 	b := &strings.Builder{}
-	fmt.Fprintf(b, " %5s: ", TraceMsgType)
+	fmt.Fprintf(b, " %5s: ", LogMsgType)
 	fmt.Fprintf(b, "%s ", s.Time.Format(timeFormat))
 	statusStr := console.Colorize("RespStatus", fmt.Sprintf("%d %s", s.StatusCode, s.StatusMsg))
 	if s.StatusCode >= http.StatusBadRequest {

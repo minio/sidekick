@@ -30,5 +30,7 @@ issues:
   exclude:
       - should have a package comment
       - error strings should not be capitalized or end with punctuation or a newline
+      - http.CloseNotifier has been deprecated since
+      - has been deprecated since Go 1.6
 service:
   golangci-lint-version: 1.45.2 # use the fixed version to not introduce new linters unexpectedly

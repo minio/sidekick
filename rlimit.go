@@ -18,7 +18,7 @@ package main
 import (
 	"runtime/debug"
 
-	"github.com/minio/pkg/sys"
+	"github.com/minio/pkg/v2/sys"
 )
 
 func setMaxResources() (err error) {
