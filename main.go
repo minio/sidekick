@@ -195,34 +195,49 @@ type BackendStats struct {
 	DowntimeStart   time.Time
 }
 
+const errMessage = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>BackendDown</Code><Message>The remote server returned an error (%v)</Message><Resource>%s</Resource></Error>`
+
+func writeErrorResponse(w http.ResponseWriter, r *http.Request, err error) {
+	// Set retry-after header to indicate user-agents to retry request after 120secs.
+	// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After
+	w.Header().Set("Retry-After", "120")
+	w.WriteHeader(http.StatusBadGateway)
+	w.Header().Set("Content-Type", "application/xml")
+	fmt.Fprintf(w, errMessage, err, r.URL.Path)
+}
+
 // ErrorHandler called by httputil.ReverseProxy for errors.
 // Avoid canceled context error since it means the client disconnected.
-func (b *Backend) ErrorHandler(_ http.ResponseWriter, _ *http.Request, err error) {
-	if err != nil {
-		offline := true
-		for _, nerr := range []error{
-			context.Canceled,
-			io.EOF,
-			io.ErrClosedPipe,
-			io.ErrUnexpectedEOF,
-			errors.New("http: server closed idle connection"),
-		} {
-			if errors.Is(err, nerr) {
-				offline = false
-				break
-			}
-			if err.Error() == nerr.Error() {
-				offline = false
-				break
-			}
+func (b *Backend) ErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	if err == nil {
+		panic("reverse proxy cannot call error handler without err being set")
+	}
+
+	offline := true
+	for _, nerr := range []error{
+		context.Canceled,
+		io.EOF,
+		io.ErrClosedPipe,
+		io.ErrUnexpectedEOF,
+		errors.New("http: server closed idle connection"),
+	} {
+		if errors.Is(err, nerr) {
+			offline = false
+			break
 		}
-		if offline {
-			if globalLoggingEnabled {
-				logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
-			}
-			b.setOffline()
+		if err.Error() == nerr.Error() {
+			offline = false
+			break
 		}
 	}
+	if offline {
+		if globalLoggingEnabled {
+			logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
+		}
+		b.setOffline()
+	}
+
+	writeErrorResponse(w, r, err)
 }
 
 // registerMetricsRouter - add handler functions for metrics.
@@ -401,7 +416,7 @@ func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	w.WriteHeader(http.StatusBadGateway)
+	writeErrorResponse(w, r, errors.New("all backend servers are offline"))
 }
 
 type site struct {
