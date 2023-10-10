@@ -461,7 +461,7 @@ func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httpTraceHdrs(backend.proxy.ServeHTTP, w, r, backend)
 		return
 	}
-	w.WriteHeader(http.StatusBadGateway)
+	writeErrorResponse(w, r, fmt.Errorf("backend %v is offline", backend.endpoint))
 }
 
 // mustGetSystemCertPool - return system CAs or empty pool in case of error (or windows)
