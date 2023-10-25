@@ -1,4 +1,4 @@
-![sidekick](https://raw.githubusercontent.com/minio/sidekick/master/sidekick_logo.png)
+[I![sidekick](https://raw.githubusercontent.com/minio/sidekick/master/sidekick_logo.png)
 
 ![build](https://github.com/minio/sidekick/workflows/Go/badge.svg) ![license](https://img.shields.io/badge/license-AGPL%20V3-blue)
 
@@ -33,7 +33,7 @@ minisign -Vm sidekick-<OS>-<ARCH> -P RWTx5Zr1tiHQLwG9keckT0c45M3AGeHD6IvimQHpyRy
 
 Pull the latest release via:
 ```
-docker pull quay.io/minio/sidekick:v4.0.1
+docker pull quay.io/minio/sidekick:v4.0.2
 ```
 
 ## Build from source
@@ -173,7 +173,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "quay.io/minio/sidekick:v4.0.1"
+      image: "quay.io/minio/sidekick:v4.0.2"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       ports:
@@ -187,7 +187,7 @@ spec:
       version: 2.4.5
     sidecars:
     - name: minio-lb
-      image: "quay.io/minio/sidekick:v4.0.1"
+      image: "quay.io/minio/sidekick:v4.0.2"
       imagePullPolicy: Always
       args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
       ports:
