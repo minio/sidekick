@@ -302,7 +302,7 @@ func doTrace(trace TraceInfo, backend *Backend) {
 		return
 	}
 
-	if globalErrorsOnly && st.StatusCode == http.StatusOK {
+	if globalErrorsOnly && st.StatusCode >= 400 && st.StatusCode < 600 {
 		return
 	}
 
