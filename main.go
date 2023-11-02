@@ -66,6 +66,8 @@ var (
 	globalTrace          string
 	globalJSONEnabled    bool
 	globalConsoleDisplay bool
+	globalErrorsOnly     bool
+	globalStatusCodes    []int
 	globalConnStats      []*ConnStats
 	log2                 *logrus.Logger
 )
@@ -807,6 +809,8 @@ func sidekickMain(ctx *cli.Context) {
 	globalQuietEnabled = ctx.GlobalBool("quiet")
 	globalConsoleDisplay = globalLoggingEnabled || ctx.IsSet("trace") || !term.IsTerminal(int(os.Stdout.Fd()))
 	globalDebugEnabled = ctx.GlobalBool("debug")
+	globalErrorsOnly = ctx.GlobalBool("errors")
+	globalStatusCodes = ctx.GlobalIntSlice("status-code")
 
 	go func() {
 		t := time.NewTicker(ctx.GlobalDuration("dns-ttl"))
@@ -960,6 +964,14 @@ func main() {
 			Name:  "dns-ttl",
 			Usage: "choose custom DNS TTL value for DNS refreshes for load balanced endpoints",
 			Value: 10 * time.Minute,
+		},
+		cli.BoolFlag{
+			Name:  "errors , e",
+			Usage: "filter out any non-error responses",
+		},
+		cli.IntSliceFlag{
+			Name:  "status-code",
+			Usage: "filter by given status code",
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
