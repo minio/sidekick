@@ -22,6 +22,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -299,6 +300,16 @@ func doTrace(trace TraceInfo, backend *Backend) {
 
 	if globalTrace == "minio" && !strings.Contains(backend.healthCheckURL, st.Path) {
 		return
+	}
+
+	if globalErrorsOnly && (st.StatusCode < 400 || st.StatusCode >= 600) {
+		return
+	}
+
+	if len(globalStatusCodes) > 0 {
+		if !slices.Contains(globalStatusCodes, st.StatusCode) {
+			return
+		}
 	}
 
 	if globalJSONEnabled {
