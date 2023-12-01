@@ -1,4 +1,4 @@
-[I![sidekick](https://raw.githubusercontent.com/minio/sidekick/master/sidekick_logo.png)
+![sidekick](https://raw.githubusercontent.com/minio/sidekick/master/sidekick_logo.png)
 
 ![build](https://github.com/minio/sidekick/workflows/Go/badge.svg) ![license](https://img.shields.io/badge/license-AGPL%20V3-blue)
 
@@ -52,8 +52,11 @@ NAME:
   sidekick - High-Performance sidecar load-balancer
 
 USAGE:
-  sidekick - [FLAGS] SITE1 [SITE2..]
+  sidekick COMMAND [COMMAND FLAGS | -h] [ARGUMENTS...]
 
+COMMANDS:
+  help, h  Shows a list of commands or help for one command
+  
 FLAGS:
   --address value, -a value           listening address for sidekick (default: ":8080")
   --health-path value, -p value       health check path
@@ -71,70 +74,80 @@ FLAGS:
   --client-key value                  client private key file
   --cert value                        server certificate file
   --key value                         server private key file
+  --pprof :1337                       start and listen for profiling on the specified address (e.g. :1337)
+  --dns-ttl value                     choose custom DNS TTL value for DNS refreshes for load balanced endpoints (default: 10m0s)
+  --errors, -e                        filter out any non-error responses
+  --status-code value                 filter by given status code
   --help, -h                          show help
   --version, -v                       print the version
 ```
 
 ## Examples
 
-### Load balance across a web service using DNS provided IPs
+### Load balance across a web service using DNS provided IPs.
 ```
 $ sidekick --health-path=/ready http://myapp.myorg.dom
 ```
 
-### Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000)
+### Load balance across 4 MinIO Servers.
+http://minio1:9000 to http://minio4:9000
 ```
 $ sidekick --health-path=/minio/health/ready --address :8000 http://minio{1...4}:9000
 ```
 
-### Two sites with 4 servers each
+### Load balance across 2 sites with 4 servers each
 ```
 $ sidekick --health-path=/minio/health/ready http://site1-minio{1...4}:9000 http://site2-minio{1...4}:9000
 ```
 
 ## Realworld Example with spark-operator
 
-As spark *driver*, *executor* sidecars, to begin with install spark-operator and MinIO on your kubernetes cluster
-
-**optional** create a kubernetes namespace `spark-operator`
-```
-kubectl create ns spark-operator
-```
+With spark as *driver* and sidecars as *executor*, first install spark-operator and MinIO on your kubernetes cluster.
 
 ### Configure *spark-operator*
 
-We shall be using maintained spark operator by GCP at https://github.com/GoogleCloudPlatform/spark-on-k8s-operator
+This guide uses the maintained spark operator by GCP at https://github.com/GoogleCloudPlatform/spark-on-k8s-operator.
 
 ```
-helm repo add incubator http://storage.googleapis.com/kubernetes-charts-incubator
-helm install spark-operator incubator/sparkoperator --namespace spark-operator  --set sparkJobNamespace=spark-operator --set enableWebhook=true
+helm repo add spark-operator https://googlecloudplatform.github.io/spark-on-k8s-operator
+helm install spark-operator spark-operator/spark-operator --namespace spark-operator --create-namespace --set sparkJobNamespace=spark-operator --set enableWebhook=true
 ```
 
-### Install *MinIO*
-```
-helm install minio-distributed stable/minio --namespace spark-operator --set accessKey=minio,secretKey=minio123,persistence.enabled=false,mode=distributed
-```
+### Install *MinIO*. 
 
-> NOTE: persistence is disabled here for testing, make sure you are using persistence with PVs for production workload.
-> For more details read our helm [documentation](https://github.com/helm/charts/tree/master/stable/minio)
+Ensure that the `standard` storage class was previously installed.
+Note that TLS is disabled for this test. Note also that the minio tenant created is called `myminio`.
 
-Once minio-distributed is up and running configure `mc` and upload some data, we shall choose `mybucket` as our bucketname.
-
-Port-forward to access minio-cluster locally.
 ```
-kubectl port-forward pod/minio-distributed-0 9000
+helm repo add minio https://operator.min.io/
+helm install minio-operator minio/operator --namespace minio-operator --create-namespace
+helm install minio-distributed minio/tenant --namespace minio-tenant --create-namespace && \
+kubectl patch tenant --namespace minio-tenant myminio --type='merge' -p '{"spec":{"requestAutoCert":false}}'
 ```
 
+Once the minio-distributed pods are running, port-forward the minio headless service to access it locally.
+```
+kubectl --namespace minio-tenant port-forward svc/myminio-hl 9000 &
+```
+
+Configure [`mc`](https://github.com/minio/mc) and upload some data. Use `mybucket` as the s3 bucket name.
 Create bucket named `mybucket` and upload some text data for spark word count sample.
 ```
 mc config host add minio-distributed http://localhost:9000 minio minio123
 mc mb minio-distributed/mybucket
-mc cp /etc/hosts minio-distributed/mybucket/mydata/{1..4}.txt
+mc cp /etc/hosts minio-distributed/mybucket/mydata.txt
 ```
 
 ### Run the spark job in k8s
 
-```yml
+Obtain the ip address and port of the `minio` service. Use them as input to `fs.s3a.endpoint` the below SparkApplication. e.g. http://10.43.141.149:80
+```
+kubectl --namespace minio-tenant get svc/minio
+```
+
+Create the `spark-minio-app` yml
+```
+cat << EOF > spark-job.yaml
 apiVersion: "sparkoperator.k8s.io/v1beta2"
 kind: SparkApplication
 metadata:
@@ -144,7 +157,7 @@ spec:
   sparkConf:
     spark.kubernetes.allocation.batch.size: "50"
   hadoopConf:
-    "fs.s3a.endpoint": "http://127.0.0.1:9000"
+    "fs.s3a.endpoint": "http://10.43.141.149:80"
     "fs.s3a.access.key": "minio"
     "fs.s3a.secret.key": "minio123"
     "fs.s3a.path.style.access": "true"
@@ -160,14 +173,12 @@ spec:
       onFailureRetryInterval: 10
       onSubmissionFailureRetries: 5
       onSubmissionFailureRetryInterval: 20
-
   mainClass: org.apache.spark.examples.JavaWordCount
   mainApplicationFile: "local:///opt/spark/examples/target/original-spark-examples_2.11-2.4.6-SNAPSHOT.jar"
   arguments:
-  - "s3a://mytestbucket/mydata"
+  - "s3a://mybucket/mydata.txt"
   driver:
     cores: 1
-    coreLimit: "1000m"
     memory: "512m"
     labels:
       version: 2.4.5
@@ -175,32 +186,36 @@ spec:
     - name: minio-lb
       image: "quay.io/minio/sidekick:v4.0.3"
       imagePullPolicy: Always
-      args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
+      args: ["--health-path", "/minio/health/ready", "--address", ":8080", "http://myminio-pool-0-{0...3}.myminio-hl.minio-tenant.svc.cluster.local:9000"]
       ports:
         - containerPort: 9000
-
+          protocol: http
   executor:
-    cores: 1
+    cores: 2
     instances: 4
-    memory: "512m"
+    memory: "1024m"
     labels:
       version: 2.4.5
     sidecars:
     - name: minio-lb
       image: "quay.io/minio/sidekick:v4.0.3"
       imagePullPolicy: Always
-      args: ["--health-path", "/minio/health/ready", "--address", ":9000", "http://minio-distributed-{0...3}.minio-distributed-svc.spark-operator.svc.cluster.local:9000"]
+      args: ["--health-path", "/minio/health/ready", "--address", ":8080", "http://myminio-pool-0-{0...3}.myminio-hl.minio-tenant.svc.cluster.local:9000"]
       ports:
         - containerPort: 9000
+          protocol: http
+EOF
 ```
 
+Grant permissions to access resources to the service account
 ```
+kubectl create clusterrolebinding spark-role --clusterrole=edit --serviceaccount=spark-operator:default --namespace=spark-operator
 kubectl create -f spark-job.yaml
 kubectl logs -f --namespace spark-operator spark-minio-app-driver spark-kubernetes-driver
 ```
 
 #### Monitor
 
-- Health-Check: Health check is provided at the path "/v1/health". It returns "200 OK" even if any one of the sites is reachable, else it returns "502 Bad Gateway" error.
+The above SparkApplication will not complete until the Health check returns "200 OK"; in this case when there is MinIO read quorum. The Health check is provided at the path "/v1/health". It returns "200 OK" even if any one of the sites is reachable, else it returns "502 Bad Gateway" error.
 
 [gh-downloads]: https://img.shields.io/github/downloads/minio/sidekick/total?color=pink&label=GitHub%20Downloads
