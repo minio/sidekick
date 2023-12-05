@@ -183,7 +183,7 @@ func (b *Backend) getServerStatus() string {
 
 // BackendStats holds server stats for backend
 type BackendStats struct {
-	sync.Mutex
+	sync.RWMutex
 	LastDowntime    time.Duration
 	CumDowntime     time.Duration
 	TotCalls        int64
@@ -195,6 +195,8 @@ type BackendStats struct {
 	Tx              int64
 	UpSince         time.Time
 	DowntimeStart   time.Time
+	LastFinished    time.Time
+	CurrentCalls    int
 }
 
 const errMessage = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>BackendDown</Code><Message>The remote server returned an error (%v)</Message><Resource>%s</Resource></Error>`
@@ -450,15 +452,37 @@ func (s *site) nextProxy() *Backend {
 	if len(backends) == 0 {
 		return nil
 	}
-
-	idx := rand.Intn(len(backends))
+	min := math.MaxInt32
+	earliest := time.Now().Add(time.Second)
+	idx := 0
+	for i, backend := range backends {
+		backend.Stats.RLock()
+		if backend.Stats.CurrentCalls < min {
+			min = backend.Stats.CurrentCalls
+			if backend.Stats.LastFinished.Before(earliest) {
+				earliest = backend.Stats.LastFinished
+				idx = i
+			}
+		}
+		backend.Stats.RUnlock()
+	}
 	// random backend from a list of available backends.
-	return backends[idx]
+	backend := backends[idx]
+	backend.Stats.Lock()
+	backend.Stats.CurrentCalls++
+	backend.Stats.Unlock()
+	return backend
 }
 
 // ServeHTTP - LoadBalancer implements http.Handler
 func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := s.nextProxy()
+	defer func() {
+		backend.Stats.Lock()
+		backend.Stats.CurrentCalls--
+		backend.Stats.LastFinished = time.Now()
+		backend.Stats.Unlock()
+	}()
 	if backend != nil && backend.Online() {
 		httpTraceHdrs(backend.proxy.ServeHTTP, w, r, backend)
 		return
@@ -719,7 +743,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 	var backends []*Backend
 	var prevScheme string
 	var transport http.RoundTripper
-	for _, endpoint := range endpoints {
+	for i, endpoint := range endpoints {
 		endpoint = strings.TrimSuffix(endpoint, slashSeparator)
 		target, err := url.Parse(endpoint)
 		if err != nil {
@@ -764,7 +788,8 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 			Transport:      transport,
 			ModifyResponse: modifyResponse(),
 		}
-		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0}
+		off := rand.New(rand.NewSource(time.Now().UnixNano())).Intn(len(endpoints))
+		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0, LastFinished: time.Now().Add(time.Duration(i + off%len(endpoints)))}
 		healthCheckURL, err := getHealthCheckURL(endpoint, healthCheckPath, healthCheckPort)
 		if err != nil {
 			console.Fatalln(err)
