@@ -183,6 +183,8 @@ func (b *Backend) getServerStatus() string {
 
 // BackendStats holds server stats for backend
 type BackendStats struct {
+	LastFinished int64
+	CurrentCalls int64
 	sync.Mutex
 	LastDowntime    time.Duration
 	CumDowntime     time.Duration
@@ -195,8 +197,6 @@ type BackendStats struct {
 	Tx              int64
 	UpSince         time.Time
 	DowntimeStart   time.Time
-	LastFinished    int64
-	CurrentCalls    int64
 }
 
 const errMessage = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>BackendDown</Code><Message>The remote server returned an error (%v)</Message><Resource>%s</Resource></Error>`
