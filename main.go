@@ -454,7 +454,7 @@ func (s *site) nextProxy() (*Backend, func()) {
 		return nil, func() {}
 	}
 	switch globalHostBalance {
-	case "leastconn":
+	case "least":
 		min := int64(math.MaxInt32)
 		earliest := time.Now().Add(time.Second).UnixNano()
 		idx := 0
@@ -840,7 +840,7 @@ func sidekickMain(ctx *cli.Context) {
 	globalStatusCodes = ctx.GlobalIntSlice("status-code")
 	globalHostBalance = ctx.GlobalString("host-balance")
 	if globalHostBalance == "" {
-		globalHostBalance = "leastconn"
+		globalHostBalance = "least"
 	}
 
 	go func() {
@@ -1006,7 +1006,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "host-balance",
-			Usage: "set host balance as leastconn or random",
+			Usage: "set host balance as least or random",
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
@@ -1043,8 +1043,8 @@ EXAMPLES:
   6. Sidekick as TLS terminator:
      $ sidekick --cert public.crt --key private.key --health-path=/minio/health/cluster http://site1-minio{1...4}:9000
 
-  7. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), Set host balance as leastconn 
-     $ sidekick ----host-balance=leastconn "/minio/health/cluster" http://minio{1...4}:9000
+  7. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), Set host balance as least 
+     $ sidekick --host-balance=least --health-path="/minio/health/cluster" http://minio{1...4}:9000
 `
 	app.Action = sidekickMain
 	app.Run(os.Args)
