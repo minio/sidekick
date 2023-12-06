@@ -183,7 +183,7 @@ func (b *Backend) getServerStatus() string {
 
 // BackendStats holds server stats for backend
 type BackendStats struct {
-	sync.RWMutex
+	sync.Mutex
 	LastDowntime    time.Duration
 	CumDowntime     time.Duration
 	TotCalls        int64
@@ -195,8 +195,8 @@ type BackendStats struct {
 	Tx              int64
 	UpSince         time.Time
 	DowntimeStart   time.Time
-	LastFinished    time.Time
-	CurrentCalls    int
+	LastFinished    int64
+	CurrentCalls    int64
 }
 
 const errMessage = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>BackendDown</Code><Message>The remote server returned an error (%v)</Message><Resource>%s</Resource></Error>`
@@ -447,42 +447,38 @@ func (s *site) upBackends() []*Backend {
 }
 
 // Returns the next backend the request should go to.
-func (s *site) nextProxy() *Backend {
+func (s *site) nextProxy() (*Backend, func()) {
 	backends := s.upBackends()
 	if len(backends) == 0 {
-		return nil
+		return nil, func() {}
 	}
-	min := math.MaxInt32
-	earliest := time.Now().Add(time.Second)
+	min := int64(math.MaxInt32)
+	earliest := time.Now().Add(time.Second).UnixNano()
 	idx := 0
 	for i, backend := range backends {
-		backend.Stats.RLock()
-		if backend.Stats.CurrentCalls < min {
-			min = backend.Stats.CurrentCalls
-			if backend.Stats.LastFinished.Before(earliest) {
-				earliest = backend.Stats.LastFinished
+		currentCalls := atomic.LoadInt64(&backend.Stats.CurrentCalls)
+		if currentCalls < min {
+			min = currentCalls
+			lastFinished := atomic.LoadInt64(&backend.Stats.LastFinished)
+			if lastFinished < earliest {
+				earliest = lastFinished
 				idx = i
 			}
 		}
-		backend.Stats.RUnlock()
 	}
 	// random backend from a list of available backends.
 	backend := backends[idx]
-	backend.Stats.Lock()
-	backend.Stats.CurrentCalls++
-	backend.Stats.Unlock()
-	return backend
+	atomic.AddInt64(&backend.Stats.CurrentCalls, 1)
+	return backend, func() {
+		atomic.AddInt64(&backend.Stats.CurrentCalls, -1)
+		atomic.StoreInt64(&backend.Stats.LastFinished, time.Now().UnixNano())
+	}
 }
 
 // ServeHTTP - LoadBalancer implements http.Handler
 func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	backend := s.nextProxy()
-	defer func() {
-		backend.Stats.Lock()
-		backend.Stats.CurrentCalls--
-		backend.Stats.LastFinished = time.Now()
-		backend.Stats.Unlock()
-	}()
+	backend, done := s.nextProxy()
+	defer done()
 	if backend != nil && backend.Online() {
 		httpTraceHdrs(backend.proxy.ServeHTTP, w, r, backend)
 		return
@@ -743,7 +739,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 	var backends []*Backend
 	var prevScheme string
 	var transport http.RoundTripper
-	for i, endpoint := range endpoints {
+	for _, endpoint := range endpoints {
 		endpoint = strings.TrimSuffix(endpoint, slashSeparator)
 		target, err := url.Parse(endpoint)
 		if err != nil {
@@ -788,8 +784,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 			Transport:      transport,
 			ModifyResponse: modifyResponse(),
 		}
-		off := rand.New(rand.NewSource(time.Now().UnixNano())).Intn(len(endpoints))
-		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0, LastFinished: time.Now().Add(time.Duration(i + off%len(endpoints)))}
+		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0}
 		healthCheckURL, err := getHealthCheckURL(endpoint, healthCheckPath, healthCheckPort)
 		if err != nil {
 			console.Fatalln(err)
