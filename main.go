@@ -1044,7 +1044,7 @@ EXAMPLES:
      $ sidekick --cert public.crt --key private.key --health-path=/minio/health/cluster http://site1-minio{1...4}:9000
 
   7. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), Set host balance as least 
-     $ sidekick --host-balance=least --health-path="/minio/health/cluster" http://minio{1...4}:9000
+     $ sidekick --host-balance=least --health-path=/minio/health/cluster http://minio{1...4}:9000
 `
 	app.Action = sidekickMain
 	app.Run(os.Args)
