@@ -466,7 +466,6 @@ func (s *site) nextProxy() (*Backend, func()) {
 			}
 		}
 	}
-	// random backend from a list of available backends.
 	backend := backends[idx]
 	atomic.AddInt64(&backend.Stats.CurrentCalls, 1)
 	return backend, func() {
