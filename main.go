@@ -1006,7 +1006,8 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "host-balance",
-			Usage: "set host balance as least or random",
+			Usage: "specify the algorithm to select backend host when load balancing, supported values are 'least', 'random'",
+			Value: "least",
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
