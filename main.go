@@ -70,6 +70,7 @@ var (
 	globalStatusCodes    []int
 	globalConnStats      []*ConnStats
 	log2                 *logrus.Logger
+	globalHostBalance    string
 )
 
 const (
@@ -183,6 +184,8 @@ func (b *Backend) getServerStatus() string {
 
 // BackendStats holds server stats for backend
 type BackendStats struct {
+	LastFinished atomic.Int64
+	CurrentCalls atomic.Int64
 	sync.Mutex
 	LastDowntime    time.Duration
 	CumDowntime     time.Duration
@@ -445,20 +448,44 @@ func (s *site) upBackends() []*Backend {
 }
 
 // Returns the next backend the request should go to.
-func (s *site) nextProxy() *Backend {
+func (s *site) nextProxy() (*Backend, func()) {
 	backends := s.upBackends()
 	if len(backends) == 0 {
-		return nil
+		return nil, func() {}
 	}
-
-	idx := rand.Intn(len(backends))
-	// random backend from a list of available backends.
-	return backends[idx]
+	switch globalHostBalance {
+	case "least":
+		min := int64(math.MaxInt32)
+		earliest := time.Now().Add(time.Second).UnixNano()
+		idx := 0
+		for i, backend := range backends {
+			currentCalls := backend.Stats.CurrentCalls.Load()
+			if currentCalls < min {
+				min = currentCalls
+				lastFinished := backend.Stats.LastFinished.Load()
+				if lastFinished < earliest {
+					earliest = lastFinished
+					idx = i
+				}
+			}
+		}
+		backend := backends[idx]
+		backend.Stats.CurrentCalls.Add(1)
+		return backend, func() {
+			backend.Stats.CurrentCalls.Add(-1)
+			backend.Stats.LastFinished.Store(time.Now().UnixNano())
+		}
+	default:
+		idx := rand.Intn(len(backends))
+		// random backend from a list of available backends.
+		return backends[idx], func() {}
+	}
 }
 
 // ServeHTTP - LoadBalancer implements http.Handler
 func (s *site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	backend := s.nextProxy()
+	backend, done := s.nextProxy()
+	defer done()
 	if backend != nil && backend.Online() {
 		httpTraceHdrs(backend.proxy.ServeHTTP, w, r, backend)
 		return
@@ -811,6 +838,10 @@ func sidekickMain(ctx *cli.Context) {
 	globalDebugEnabled = ctx.GlobalBool("debug")
 	globalErrorsOnly = ctx.GlobalBool("errors")
 	globalStatusCodes = ctx.GlobalIntSlice("status-code")
+	globalHostBalance = ctx.GlobalString("host-balance")
+	if globalHostBalance == "" {
+		globalHostBalance = "least"
+	}
 
 	go func() {
 		t := time.NewTicker(ctx.GlobalDuration("dns-ttl"))
@@ -973,6 +1004,11 @@ func main() {
 			Name:  "status-code",
 			Usage: "filter by given status code",
 		},
+		cli.StringFlag{
+			Name:  "host-balance",
+			Usage: "specify the algorithm to select backend host when load balancing, supported values are 'least', 'random'",
+			Value: "least",
+		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
   {{.Name}} - {{.Description}}
@@ -1007,6 +1043,9 @@ EXAMPLES:
 
   6. Sidekick as TLS terminator:
      $ sidekick --cert public.crt --key private.key --health-path=/minio/health/cluster http://site1-minio{1...4}:9000
+
+  7. Load balance across 4 MinIO Servers (http://minio1:9000 to http://minio4:9000), Set host balance as least 
+     $ sidekick --host-balance=least --health-path=/minio/health/cluster http://minio{1...4}:9000
 `
 	app.Action = sidekickMain
 	app.Run(os.Args)
