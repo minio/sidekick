@@ -455,9 +455,14 @@ func (s *site) nextProxy() (*Backend, func()) {
 	}
 	switch globalHostBalance {
 	case "least":
-		min := int64(math.MaxInt32)
-		earliest := time.Now().Add(time.Second).UnixNano()
+		min := int64(math.MaxInt64)
+		earliest := int64(math.MaxInt64)
 		idx := 0
+		// Shuffle before picking the least connection to ensure all nodes
+		// are involved if the load is low to medium.
+		rand.Shuffle(len(backends), func(i, j int) {
+			backends[i], backends[j] = backends[j], backends[i]
+		})
 		for i, backend := range backends {
 			currentCalls := backend.Stats.CurrentCalls.Load()
 			if currentCalls < min {
