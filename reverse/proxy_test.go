@@ -410,7 +410,7 @@ func TestProxyCancellation(t *testing.T) {
 	const backendResponse = "I am the backend"
 
 	reqInFlight := make(chan struct{})
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(reqInFlight) // cause the client to cancel its request
 
 		select {
@@ -469,7 +469,7 @@ func req(t *testing.T, v string) *http.Request {
 
 // Issue 12344
 func TestNilBody(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("hi"))
 	}))
 	defer backend.Close()
@@ -500,7 +500,7 @@ func TestNilBody(t *testing.T) {
 // Issue 15524
 func TestUserAgentHeader(t *testing.T) {
 	const explicitUA = "explicit UA"
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/noua" {
 			if c := r.Header.Get("User-Agent"); c != "" {
 				t.Errorf("handler got non-empty User-Agent header %q", c)
@@ -695,7 +695,7 @@ func TestProxyErrorHandler(t *testing.T) {
 		{
 			name:         "errorhandler",
 			wantCode:     http.StatusTeapot,
-			errorHandler: func(rw http.ResponseWriter, req *http.Request, err error) { rw.WriteHeader(http.StatusTeapot) },
+			errorHandler: func(rw http.ResponseWriter, _ *http.Request, _ error) { rw.WriteHeader(http.StatusTeapot) },
 		},
 		{
 			name: "modifyresponse_noerr",
@@ -706,7 +706,7 @@ func TestProxyErrorHandler(t *testing.T) {
 				res.StatusCode++
 				return nil
 			},
-			errorHandler: func(rw http.ResponseWriter, req *http.Request, err error) { rw.WriteHeader(http.StatusTeapot) },
+			errorHandler: func(rw http.ResponseWriter, _ *http.Request, _ error) { rw.WriteHeader(http.StatusTeapot) },
 			wantCode:     346,
 		},
 		{
@@ -718,7 +718,7 @@ func TestProxyErrorHandler(t *testing.T) {
 				res.StatusCode++
 				return errors.New("some error to trigger errorHandler")
 			},
-			errorHandler: func(rw http.ResponseWriter, req *http.Request, err error) { rw.WriteHeader(http.StatusTeapot) },
+			errorHandler: func(rw http.ResponseWriter, _ *http.Request, _ error) { rw.WriteHeader(http.StatusTeapot) },
 			wantCode:     http.StatusTeapot,
 		},
 	}
@@ -756,7 +756,7 @@ func TestProxyErrorHandler(t *testing.T) {
 
 // Issue 16659: log errors from short read
 func TestProxy_CopyBuffer(t *testing.T) {
-	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		out := "this call was relayed by the reverse proxy"
 		// Coerce a wrong content length to induce io.UnexpectedEOF
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(out)*2))
@@ -815,7 +815,7 @@ func BenchmarkServeHTTP(b *testing.B) {
 }
 
 func TestServeHTTPDeepCopy(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("Hello Gopher!"))
 	}))
 	defer backend.Close()
@@ -892,7 +892,7 @@ func TestModifyResponseClosesBody(t *testing.T) {
 	closeCheck := new(checkCloser)
 	outErr := errors.New("ModifyResponse error")
 	rp := &Proxy{
-		Director: func(req *http.Request) {},
+		Director: func(_ *http.Request) {},
 		Transport: &staticTransport{&http.Response{
 			StatusCode: 200,
 			Body:       closeCheck,
@@ -929,7 +929,7 @@ func (cc *checkCloser) Read(b []byte) (int, error) {
 func TestProxy_PanicBodyError(t *testing.T) {
 	log.SetOutput(io.Discard)
 	defer log.SetOutput(os.Stderr)
-	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		out := "this call was relayed by the reverse proxy"
 		// Coerce a wrong content length to induce io.ErrUnexpectedEOF
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(out)*2))
@@ -970,7 +970,7 @@ func (b neverEnding) Read(p []byte) (n int, err error) {
 
 // Issue #46866: panic without closing incoming request body causes a panic
 func TestProxy_PanicClosesIncomingBody(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		out := "this call was relayed by the reverse proxy"
 		// Coerce a wrong content length to induce io.ErrUnexpectedEOF
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(out)*2))
@@ -1222,7 +1222,7 @@ func TestProxyWebSocketCancellation(t *testing.T) {
 }
 
 func TestUnannouncedTrailer(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
 		w.Header().Set(http.TrailerPrefix+"X-Unannounced-Trailer", "unannounced_trailer_value")
