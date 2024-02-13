@@ -569,7 +569,7 @@ func dialContextWithDNSCache(resolver *dnscache.Resolver, baseDialCtx DialContex
 
 		if net.ParseIP(host) != nil {
 			// For IP only setups there is no need for DNS lookups.
-			return baseDialCtx(ctx, "tcp", addr)
+			return baseDialCtx(ctx, network, addr)
 		}
 
 		ips, err := resolver.LookupHost(ctx, host)
@@ -578,7 +578,7 @@ func dialContextWithDNSCache(resolver *dnscache.Resolver, baseDialCtx DialContex
 		}
 
 		for _, ip := range ips {
-			conn, err = baseDialCtx(ctx, "tcp", net.JoinHostPort(ip, port))
+			conn, err = baseDialCtx(ctx, network, net.JoinHostPort(ip, port))
 			if err == nil {
 				break
 			}
