@@ -33,7 +33,7 @@ minisign -Vm sidekick-<OS>-<ARCH> -P RWTx5Zr1tiHQLwG9keckT0c45M3AGeHD6IvimQHpyRy
 
 Pull the latest release via:
 ```
-docker pull quay.io/minio/sidekick:v4.0.3
+docker pull quay.io/minio/sidekick:v4.0.6
 ```
 
 ## Build from source
@@ -74,10 +74,6 @@ FLAGS:
   --client-key value                  client private key file
   --cert value                        server certificate file
   --key value                         server private key file
-  --pprof :1337                       start and listen for profiling on the specified address (e.g. :1337)
-  --dns-ttl value                     choose custom DNS TTL value for DNS refreshes for load balanced endpoints (default: 10m0s)
-  --errors, -e                        filter out any non-error responses
-  --status-code value                 filter by given status code
   --help, -h                          show help
   --version, -v                       print the version
 ```
@@ -110,7 +106,7 @@ This guide uses the maintained spark operator by GCP at https://github.com/Googl
 
 ```
 helm repo add spark-operator https://googlecloudplatform.github.io/spark-on-k8s-operator
-helm install spark-operator spark-operator/spark-operator --namespace spark-operator --create-namespace --set sparkJobNamespace=spark-operator --set enableWebhook=true
+helm --namespace spark-operator install spark-operator spark-operator/spark-operator --create-namespace --set sparkJobNamespace=spark-operator --set enableWebhook=true
 ```
 
 ### Install *MinIO*. 
@@ -119,30 +115,31 @@ Ensure that the `standard` storage class was previously installed.
 Note that TLS is disabled for this test. Note also that the minio tenant created is called `myminio`.
 
 ```
-helm repo add minio https://operator.min.io/
-helm install minio-operator minio/operator --namespace minio-operator --create-namespace
-helm install minio-distributed minio/tenant --namespace minio-tenant --create-namespace && \
-kubectl patch tenant --namespace minio-tenant myminio --type='merge' -p '{"spec":{"requestAutoCert":false}}'
+helm repo add minio-operator https://operator.min.io/
+helm install operator minio-operator/operator --namespace minio-operator --create-namespace
+  
+helm install myminio minio-operator/tenant --namespace tenant-sidekick --create-namespace && \
+kubectl --namespace tenant-sidekick patch tenant myminio --type='merge' -p '{"spec":{"requestAutoCert":false}}'
 ```
 
-Once the minio-distributed pods are running, port-forward the minio headless service to access it locally.
+Once the tenant pods are running, port-forward the minio headless service to access it locally.
 ```
-kubectl --namespace minio-tenant port-forward svc/myminio-hl 9000 &
+kubectl --namespace tenant-sidekick port-forward svc/myminio-hl 9000 &
 ```
 
 Configure [`mc`](https://github.com/minio/mc) and upload some data. Use `mybucket` as the s3 bucket name.
 Create bucket named `mybucket` and upload some text data for spark word count sample.
 ```
-mc config host add minio-distributed http://localhost:9000 minio minio123
-mc mb minio-distributed/mybucket
-mc cp /etc/hosts minio-distributed/mybucket/mydata.txt
+mc alias set myminio http://localhost:9000 minio minio123
+mc mb myminio/mybucket
+mc cp /etc/hosts myminio/mybucket/mydata.txt
 ```
 
 ### Run the spark job in k8s
 
 Obtain the ip address and port of the `minio` service. Use them as input to `fs.s3a.endpoint` the below SparkApplication. e.g. http://10.43.141.149:80
 ```
-kubectl --namespace minio-tenant get svc/minio
+kubectl --namespace tenant-sidekick get svc/minio
 ```
 
 Create the `spark-minio-app` yml
@@ -186,7 +183,7 @@ spec:
     - name: minio-lb
       image: "quay.io/minio/sidekick:v4.0.3"
       imagePullPolicy: Always
-      args: ["--health-path", "/minio/health/ready", "--address", ":8080", "http://myminio-pool-0-{0...3}.myminio-hl.minio-tenant.svc.cluster.local:9000"]
+      args: ["--health-path", "/minio/health/ready", "--address", ":8080", "http://myminio-pool-0-{0...3}.myminio-hl.tenant-sidekick.svc.cluster.local:9000"]
       ports:
         - containerPort: 9000
           protocol: http
@@ -200,7 +197,7 @@ spec:
     - name: minio-lb
       image: "quay.io/minio/sidekick:v4.0.3"
       imagePullPolicy: Always
-      args: ["--health-path", "/minio/health/ready", "--address", ":8080", "http://myminio-pool-0-{0...3}.myminio-hl.minio-tenant.svc.cluster.local:9000"]
+      args: ["--health-path", "/minio/health/ready", "--address", ":8080", "http://myminio-pool-0-{0...3}.myminio-hl.tenant-sidekick.svc.cluster.local:9000"]
       ports:
         - containerPort: 9000
           protocol: http
@@ -211,7 +208,7 @@ Grant permissions to access resources to the service account
 ```
 kubectl create clusterrolebinding spark-role --clusterrole=edit --serviceaccount=spark-operator:default --namespace=spark-operator
 kubectl create -f spark-job.yaml
-kubectl logs -f --namespace spark-operator spark-minio-app-driver spark-kubernetes-driver
+kubectl --namespace spark-operator logs -f spark-minio-app-driver
 ```
 
 #### Monitor
