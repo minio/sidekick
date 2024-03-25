@@ -660,9 +660,9 @@ func modifyResponse() func(*http.Response) error {
 	}
 }
 
-// sortIPs - sort ips based on higher octects.
+// sortIPs - sort ips based on higher octets.
 // The logic to sort by last octet is implemented to
-// prefer CIDRs with higher octects, this in-turn skips the
+// prefer CIDRs with higher octets, this in-turn skips the
 // localhost/loopback address to be not preferred as the
 // first ip on the list. Subsequently this list helps us print
 // a user friendly message with appropriate values.
@@ -671,32 +671,43 @@ func sortIPs(ipList []string) []string {
 		return ipList
 	}
 
-	var ipV4s []net.IP
+	var IPs []net.IP
 	var nonIPs []string
 	for _, ip := range ipList {
 		nip := net.ParseIP(ip)
 		if nip != nil {
-			ipV4s = append(ipV4s, nip)
+			IPs = append(IPs, nip)
 		} else {
 			nonIPs = append(nonIPs, ip)
 		}
 	}
 
-	sort.Slice(ipV4s, func(i, j int) bool {
+	sort.Slice(IPs, func(i, j int) bool {
 		// This case is needed when all ips in the list
 		// have same last octets, Following just ensures that
 		// 127.0.0.1 is moved to the end of the list.
-		if ipV4s[i].IsLoopback() {
+		if IPs[i].IsLoopback() {
 			return false
 		}
-		if ipV4s[j].IsLoopback() {
+		if IPs[j].IsLoopback() {
 			return true
 		}
-		return []byte(ipV4s[i].To4())[3] > []byte(ipV4s[j].To4())[3]
+		// Prefer IPv4 over IPv6
+		if IPs[i].To16() == nil && IPs[j].To16() != nil {
+			return true
+		}
+		if IPs[i].To16() != nil && IPs[j].To16() == nil {
+			return false
+		}
+		if IPs[i].To16() != nil {
+			return true // TODO: check if any IPv6 order can be preferred
+		}
+		// Sort IPs v4 based on higher octets.
+		return []byte(IPs[i].To4())[3] > []byte(IPs[j].To4())[3]
 	})
 
 	var ips []string
-	for _, ip := range ipV4s {
+	for _, ip := range IPs {
 		ips = append(ips, ip.String())
 	}
 
@@ -708,11 +719,14 @@ func getPublicIP() string {
 	addrs, _ := net.InterfaceAddrs()
 	for _, addr := range addrs {
 		ipNet, ok := addr.(*net.IPNet)
-		if ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+		if ok {
 			IPs = append(IPs, ipNet.IP.String())
 		}
 	}
-	return sortIPs(IPs)[0] // There would be at least one entry
+	if ips := sortIPs(IPs); len(ips) > 0 {
+		return ips[0]
+	}
+	return "<unknown-address>"
 }
 
 // IsLoopback - returns true if given IP is a loopback
