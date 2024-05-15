@@ -9,7 +9,7 @@ release:
 
 before:
   hooks:
-    - go mod tidy -compat=1.19
+    - go mod tidy -compat=1.21
 
 builds:
   -
