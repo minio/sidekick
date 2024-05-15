@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"slices"
 	"strconv"
@@ -242,7 +241,7 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 	var reqBodyRecorder *recordRequest
 	t := TraceInfo{}
 	reqBodyRecorder = &recordRequest{Reader: r.Body, logBody: logBody, headers: reqHeaders}
-	r.Body = ioutil.NopCloser(reqBodyRecorder)
+	r.Body = io.NopCloser(reqBodyRecorder)
 
 	rw := NewResponseWriter(w)
 	rw.LogBody = logBody

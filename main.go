@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023 MinIO, Inc.
+// Copyright (c) 2021-2024 MinIO, Inc.
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"net"
@@ -315,7 +314,7 @@ func (b *Backend) healthCheck() {
 func drainBody(resp *http.Response) {
 	if resp != nil {
 		// Drain the connection.
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
 }
@@ -514,7 +513,7 @@ func getCertPool(cacert string) *x509.CertPool {
 	}
 
 	pool := x509.NewCertPool()
-	caPEM, err := ioutil.ReadFile(cacert)
+	caPEM, err := os.ReadFile(cacert)
 	if err != nil {
 		console.Fatalln(fmt.Errorf("unable to load CA certificate: %s", err))
 	}
@@ -533,11 +532,11 @@ func getCertKeyPair(cert, key string) []tls.Certificate {
 	if cert == "" || key == "" {
 		console.Fatalln(fmt.Errorf("both --cert and --key flags must be specified"))
 	}
-	certPEM, err := ioutil.ReadFile(cert)
+	certPEM, err := os.ReadFile(cert)
 	if err != nil {
 		console.Fatalln(fmt.Errorf("unable to load certificate: %s", err))
 	}
-	keyPEM, err := ioutil.ReadFile(key)
+	keyPEM, err := os.ReadFile(key)
 	if err != nil {
 		console.Fatalln(fmt.Errorf("unable to load key: %s", err))
 	}
@@ -555,9 +554,6 @@ func getCertKeyPair(cert, key string) []tls.Certificate {
 // is given, it sets default dial function.
 //
 // You can use returned dial function for `http.Transport.DialContext`.
-//
-// In this function, it uses functions from `rand` package. To make it really random,
-// you MUST call `rand.Seed` and change the value from the default in your application
 func dialContextWithDNSCache(resolver *dnscache.Resolver, baseDialCtx DialContext) DialContext {
 	if baseDialCtx == nil {
 		// This is same as which `http.DefaultTransport` uses.
@@ -925,9 +921,6 @@ func sidekickMain(ctx *cli.Context) {
 }
 
 func main() {
-	// Set-up rand seed and use global rand to avoid concurrency issues.
-	rand.Seed(time.Now().UTC().UnixNano())
-
 	// Set system resources to maximum.
 	setMaxResources()
 

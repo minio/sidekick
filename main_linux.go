@@ -73,7 +73,6 @@ func setTCPParameters(_, _ string, c syscall.RawConn) error {
 		// This is a sensitive configuration, it is better to set it to high values, > 60 secs since it can
 		// affect clients reading data with a very slow pace  (disappropriate with socket buffer sizes)
 		_ = syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, unix.TCP_USER_TIMEOUT, 600000)
-
 	})
 	return nil
 }

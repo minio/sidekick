@@ -13,7 +13,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/textproto"
@@ -218,7 +217,7 @@ func (p *Proxy) modifyResponse(rw http.ResponseWriter, res *http.Response, req *
 func drainBody(resp *http.Response) {
 	if resp != nil {
 		// Drain the connection.
-		io.CopyN(ioutil.Discard, resp.Body, 128<<10) // drain upto 128K
+		io.CopyN(io.Discard, resp.Body, 128<<10) // drain upto 128K
 		resp.Body.Close()
 	}
 }
