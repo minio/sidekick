@@ -2,3 +2,4 @@
 sidekick
 dist/
 *.test
+.idea/
