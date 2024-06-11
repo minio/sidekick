@@ -926,7 +926,11 @@ func sidekickMain(ctx *cli.Context) {
 		if err != nil {
 			console.Fatalln(err)
 		}
-		server := &http.Server{}
+		server := &http.Server{
+			Handler:   router,
+			Addr:      addr,
+			TLSConfig: tlsConfig,
+		}
 		err = server.Serve(listener)
 		if err != nil {
 			console.Fatalln(err)
