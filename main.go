@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"math/rand"
 	"net"
@@ -910,6 +911,11 @@ func sidekickMain(ctx *cli.Context) {
 	}
 
 	router.PathPrefix(slashSeparator).Handler(m)
+	server := &http.Server{
+		Addr:     addr,
+		Handler:  router,
+		ErrorLog: log.New(io.Discard, "", 0), // Turn-off random logging by Go stdlib. From MinIO server implementation.
+	}
 	if ctx.String("cert") != "" && ctx.String("key") != "" {
 		manager, err := certs.NewManager(context.Background(), ctx.String("cert"), ctx.String("key"), tls.LoadX509KeyPair)
 		if err != nil {
@@ -922,21 +928,17 @@ func sidekickMain(ctx *cli.Context) {
 			MinVersion:               tls.VersionTLS12,
 			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
 		}
+		server.TLSConfig = tlsConfig
 		listener, err := tls.Listen("tcp", addr, tlsConfig)
 		if err != nil {
 			console.Fatalln(err)
-		}
-		server := &http.Server{
-			Handler:   router,
-			Addr:      addr,
-			TLSConfig: tlsConfig,
 		}
 		err = server.Serve(listener)
 		if err != nil {
 			console.Fatalln(err)
 		}
 	} else {
-		if err := http.ListenAndServe(addr, router); err != nil {
+		if err := server.ListenAndServe(); err != nil {
 			console.Fatalln(err)
 		}
 	}
