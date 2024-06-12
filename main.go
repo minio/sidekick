@@ -43,10 +43,10 @@ import (
 
 	"github.com/minio/cli"
 	"github.com/minio/dnscache"
-	"github.com/minio/pkg/v2/certs"
-	"github.com/minio/pkg/v2/console"
-	"github.com/minio/pkg/v2/ellipses"
-	xnet "github.com/minio/pkg/v2/net"
+	"github.com/minio/pkg/v3/certs"
+	"github.com/minio/pkg/v3/console"
+	"github.com/minio/pkg/v3/ellipses"
+	xnet "github.com/minio/pkg/v3/net"
 	"github.com/minio/sidekick/reverse"
 )
 

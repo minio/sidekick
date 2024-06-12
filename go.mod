@@ -10,7 +10,7 @@ require (
 	github.com/minio/cli v1.24.2
 	github.com/minio/dnscache v0.1.1
 	github.com/minio/pkg v1.7.5
-	github.com/minio/pkg/v2 v2.0.19
+	github.com/minio/pkg/v3 v3.0.1
 	github.com/prometheus/client_golang v1.19.1
 	github.com/rivo/tview v0.0.0-20240505185119-ed116790de0f
 	github.com/sirupsen/logrus v1.9.3
