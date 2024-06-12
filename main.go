@@ -917,7 +917,7 @@ func sidekickMain(ctx *cli.Context) {
 		}
 		tlsConfig := &tls.Config{
 			PreferServerCipherSuites: true,
-			NextProtos:               []string{"h2", "http/1.1"},
+			NextProtos:               []string{"http/1.1", "h2"},
 			GetCertificate:           manager.GetCertificate,
 			MinVersion:               tls.VersionTLS12,
 			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
