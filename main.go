@@ -43,9 +43,10 @@ import (
 
 	"github.com/minio/cli"
 	"github.com/minio/dnscache"
-	"github.com/minio/pkg/v2/console"
-	"github.com/minio/pkg/v2/ellipses"
-	xnet "github.com/minio/pkg/v2/net"
+	"github.com/minio/pkg/v3/certs"
+	"github.com/minio/pkg/v3/console"
+	"github.com/minio/pkg/v3/ellipses"
+	xnet "github.com/minio/pkg/v3/net"
 	"github.com/minio/sidekick/reverse"
 )
 
@@ -910,7 +911,28 @@ func sidekickMain(ctx *cli.Context) {
 
 	router.PathPrefix(slashSeparator).Handler(m)
 	if ctx.String("cert") != "" && ctx.String("key") != "" {
-		if err := http.ListenAndServeTLS(addr, ctx.String("cert"), ctx.String("key"), router); err != nil {
+		manager, err := certs.NewManager(context.Background(), ctx.String("cert"), ctx.String("key"), tls.LoadX509KeyPair)
+		if err != nil {
+			console.Fatalln(err)
+		}
+		tlsConfig := &tls.Config{
+			PreferServerCipherSuites: true,
+			NextProtos:               []string{"http/1.1", "h2"},
+			GetCertificate:           manager.GetCertificate,
+			MinVersion:               tls.VersionTLS12,
+			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
+		}
+		listener, err := tls.Listen("tcp", addr, tlsConfig)
+		if err != nil {
+			console.Fatalln(err)
+		}
+		server := &http.Server{
+			Handler:   router,
+			Addr:      addr,
+			TLSConfig: tlsConfig,
+		}
+		err = server.Serve(listener)
+		if err != nil {
 			console.Fatalln(err)
 		}
 	} else {
