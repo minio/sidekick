@@ -155,6 +155,7 @@ type Backend struct {
 	up                  int32
 	healthCheckURL      string
 	healthCheckDuration time.Duration
+	healthCheckTimeout  time.Duration
 	Stats               *BackendStats
 }
 
@@ -323,7 +324,7 @@ func drainBody(resp *http.Response) {
 
 func (b *Backend) doHealthCheck() error {
 	// Set up a maximum timeout time for the healtcheck operation
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), b.healthCheckTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.healthCheckURL, nil)
@@ -739,7 +740,7 @@ func IsLoopback(addr string) bool {
 	return net.ParseIP(host).IsLoopback()
 }
 
-func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration time.Duration) *site {
+func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration, healthCheckTimeout time.Duration) *site {
 	var endpoints []string
 
 	if ellipses.HasEllipses(siteStrs...) {
@@ -815,7 +816,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 		}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckURL, healthCheckDuration, &stats}
+		}, 0, healthCheckURL, healthCheckDuration, healthCheckTimeout, &stats}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
@@ -840,6 +841,7 @@ func sidekickMain(ctx *cli.Context) {
 	healthReadCheckPath := ctx.GlobalString("read-health-path")
 	healthCheckPort := ctx.GlobalInt("health-port")
 	healthCheckDuration := ctx.GlobalDuration("health-duration")
+	healthCheckTimeout := ctx.GlobalDuration("health-timeout")
 	addr := ctx.GlobalString("address")
 
 	// Validate port range which should be in [0, 65535]
@@ -886,7 +888,7 @@ func sidekickMain(ctx *cli.Context) {
 			healthCheckPath = healthReadCheckPath
 		}
 
-		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration)
+		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout)
 		sites = append(sites, site)
 	}
 
@@ -977,6 +979,11 @@ func main() {
 			Name:  "health-duration, d",
 			Usage: "health check duration in seconds",
 			Value: 5 * time.Second,
+		},
+		cli.DurationFlag{
+			Name:  "health-timeout",
+			Usage: "health check timeout in seconds",
+			Value: 10 * time.Second,
 		},
 		cli.BoolFlag{
 			Name:  "insecure, i",
