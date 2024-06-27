@@ -38,6 +38,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dustin/go-humanize"
+	"github.com/fatih/color"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
@@ -411,8 +413,32 @@ type multisite struct {
 	sites []*site
 }
 
+func (m *multisite) populate(cellText [][]string) {
+	for i, site := range m.sites {
+		for j, b := range site.backends {
+			minLatency := "0s"
+			maxLatency := "0s"
+			if b.Stats.MaxLatency > 0 {
+				minLatency = fmt.Sprintf("%2s", b.Stats.MinLatency.Round(time.Microsecond))
+				maxLatency = fmt.Sprintf("%2s", b.Stats.MaxLatency.Round(time.Microsecond))
+			}
+			cellText[i*len(site.backends)+j][0] = humanize.Ordinal(b.siteNumber)
+			cellText[i*len(site.backends)+j][1] = b.endpoint
+			cellText[i*len(site.backends)+j][2] = b.getServerStatus()
+			cellText[i*len(site.backends)+j][3] = strconv.FormatInt(b.Stats.TotCalls, 10)
+			cellText[i*len(site.backends)+j][4] = strconv.FormatInt(b.Stats.TotCallFailures, 10)
+			cellText[i*len(site.backends)+j][5] = humanize.IBytes(uint64(b.Stats.Rx))
+			cellText[i*len(site.backends)+j][6] = humanize.IBytes(uint64(b.Stats.Tx))
+			cellText[i*len(site.backends)+j][7] = b.Stats.CumDowntime.Round(time.Microsecond).String()
+			cellText[i*len(site.backends)+j][8] = b.Stats.LastDowntime.Round(time.Microsecond).String()
+			cellText[i*len(site.backends)+j][9] = minLatency
+			cellText[i*len(site.backends)+j][10] = maxLatency
+		}
+	}
+}
+
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Server", "SideKick") // indicate sidekick is serving the request
+	w.Header().Set("Server", "SideKick") // indicate sidekick is serving
 	for _, s := range m.sites {
 		if s.Online() {
 			if r.URL.Path == healthPath {
@@ -828,6 +854,20 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 	}
 }
 
+var headers = []string{
+	"SITE",
+	"HOST",
+	"STATUS",
+	"CALLS",
+	"FAILURES",
+	"Rx",
+	"Tx",
+	"TOTAL DOWNTIME",
+	"LAST DOWNTIME",
+	"MIN LATENCY",
+	"MAX LATENCY",
+}
+
 func sidekickMain(ctx *cli.Context) {
 	checkMain(ctx)
 
@@ -892,10 +932,18 @@ func sidekickMain(ctx *cli.Context) {
 		sites = append(sites, site)
 	}
 
-	m := &multisite{sites}
-	initUI(m)
-
 	if globalConsoleDisplay {
+		console.SetColor("LogMsgType", color.New(color.FgHiMagenta))
+		console.SetColor("TraceMsgType", color.New(color.FgYellow))
+		console.SetColor("Stat", color.New(color.FgYellow))
+		console.SetColor("Request", color.New(color.FgCyan))
+		console.SetColor("Method", color.New(color.Bold, color.FgWhite))
+		console.SetColor("Host", color.New(color.Bold, color.FgGreen))
+		console.SetColor("ReqHeaderKey", color.New(color.Bold, color.FgWhite))
+		console.SetColor("RespHeaderKey", color.New(color.Bold, color.FgCyan))
+		console.SetColor("RespStatus", color.New(color.Bold, color.FgYellow))
+		console.SetColor("ErrStatus", color.New(color.Bold, color.FgRed))
+		console.SetColor("Response", color.New(color.FgGreen))
 		console.Infof("listening on '%s'\n", addr)
 	}
 
@@ -910,6 +958,43 @@ func sidekickMain(ctx *cli.Context) {
 	router := mux.NewRouter().SkipClean(true).UseEncodedPath()
 	if err := registerMetricsRouter(router); err != nil {
 		console.Fatalln(err)
+	}
+
+	m := &multisite{sites}
+	if !globalConsoleDisplay {
+		dspOrder := []col{colGreen} // Header
+		for i := 0; i < len(sites); i++ {
+			for range sites[i].backends {
+				dspOrder = append(dspOrder, colGrey)
+			}
+		}
+		var printColors []*color.Color
+		for _, c := range dspOrder {
+			printColors = append(printColors, getPrintCol(c))
+		}
+
+		tbl := console.NewTable(printColors, []bool{
+			false, false, false, false, false, false,
+			false, false, false, false, false,
+		}, 0)
+
+		cellText := make([][]string, len(dspOrder))
+		for i := range dspOrder {
+			cellText[i] = make([]string, len(headers))
+		}
+		cellText[0] = headers
+
+		go func() {
+			// Clear screen before we start the table UI
+			clearScreen()
+
+			ticker := time.NewTicker(500 * time.Millisecond)
+			for range ticker.C {
+				m.populate(cellText[1:])
+				console.RewindLines(len(cellText) + 2)
+				tbl.DisplayTable(cellText)
+			}
+		}()
 	}
 
 	router.PathPrefix(slashSeparator).Handler(m)
@@ -931,18 +1016,9 @@ func sidekickMain(ctx *cli.Context) {
 			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
 		}
 		server.TLSConfig = tlsConfig
-		listener, err := tls.Listen("tcp", addr, tlsConfig)
-		if err != nil {
-			console.Fatalln(err)
-		}
-		err = server.Serve(listener)
-		if err != nil {
-			console.Fatalln(err)
-		}
-	} else {
-		if err := server.ListenAndServe(); err != nil {
-			console.Fatalln(err)
-		}
+	}
+	if err := server.ListenAndServe(); err != nil {
+		console.Fatalln(err)
 	}
 }
 
