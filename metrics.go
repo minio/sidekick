@@ -53,8 +53,9 @@ func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
 	// automatically read the global stats
 	// Read/Write Lock is not required here
 	globalConnStatsRWMutex.RLock()
-	defer globalConnStatsRWMutex.RUnlock()
-	for _, c := range globalConnStats {
+	connStats := globalConnStats
+	globalConnStatsRWMutex.RUnlock()
+	for _, c := range connStats {
 		if c == nil {
 			continue
 		}

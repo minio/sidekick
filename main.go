@@ -404,7 +404,9 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 	// automatically update the global stats
 	// Read/Write Lock is not required here
 	globalConnStatsRWMutex.RLock()
-	for _, c := range globalConnStats {
+	connStats := globalConnStats
+	globalConnStatsRWMutex.RUnlock()
+	for _, c := range connStats {
 		if c == nil {
 			continue
 		}
@@ -418,7 +420,6 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 		c.setTotalCalls(b.Stats.TotCalls)
 		c.setTotalCallFailures(b.Stats.TotCallFailures)
 	}
-	globalConnStatsRWMutex.RUnlock()
 }
 
 type multisite struct {
