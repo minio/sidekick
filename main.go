@@ -312,7 +312,6 @@ func (b *Backend) healthCheck(ctxt context.Context) {
 	ticker := time.NewTicker(b.healthCheckDuration)
 	defer ticker.Stop()
 	for {
-
 		select {
 		case <-ctxt.Done():
 			return
@@ -447,6 +446,7 @@ func (m *multisite) renewSite(ctx *cli.Context, healthCheckPath string, healthRe
 	}
 	m.healthCanceler = cancel
 }
+
 func (m *multisite) displayUI(show bool) {
 	if !show {
 		return
