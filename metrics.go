@@ -50,6 +50,10 @@ func (c *sidekickCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect is called by the Prometheus registry when collecting metrics.
 func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
+	// automatically read the global stats
+	// Read/Write Lock is not required here
+	globalConnStatsRWMutex.RLock()
+	defer globalConnStatsRWMutex.RUnlock()
 	for _, c := range globalConnStats {
 		if c == nil {
 			continue
