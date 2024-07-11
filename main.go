@@ -702,7 +702,7 @@ func newProxyDialContext(dialTimeout time.Duration) DialContext {
 // tlsClientSessionCacheSize is the cache size for TLS client sessions.
 const tlsClientSessionCacheSize = 100
 
-func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
+func clientTransport(ctx *cli.Context, enableTLS bool, hostName string) http.RoundTripper {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           dialContextWithDNSCache(dnsCache, newProxyDialContext(10*time.Second)),
@@ -726,13 +726,14 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 		tr.TLSClientConfig = &tls.Config{
 			RootCAs:            getCertPool(ctx.GlobalString("cacert")),
 			Certificates:       getCertKeyPair(ctx.GlobalString("client-cert"), ctx.GlobalString("client-key")),
-			InsecureSkipVerify: ctx.GlobalBool("insecure") || ctx.GlobalBool("rr-dns-mode"),
+			InsecureSkipVerify: ctx.GlobalBool("insecure"),
 			// Can't use SSLv3 because of POODLE and BEAST
 			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
 			// Can't use TLSv1.1 because of RC4 cipher usage
 			MinVersion:               tls.VersionTLS12,
 			PreferServerCipherSuites: true,
 			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
+			ServerName:               hostName,
 		}
 	}
 
@@ -858,13 +859,14 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 	var prevScheme string
 	var transport http.RoundTripper
 	var connStats []*ConnStats
+	var hostName string
 	if len(endpoints) == 1 && ctx.GlobalBool("rr-dns-mode") {
 		// guess it is LB config address
 		target, err := url.Parse(endpoints[0])
 		if err != nil {
 			console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", endpoints[0], err))
 		}
-		hostName := target.Hostname()
+		hostName = target.Hostname()
 		ips, err := net.LookupHost(hostName)
 		if err != nil {
 			console.Fatalln(fmt.Errorf("Unable to lookup host %s", hostName))
@@ -900,7 +902,7 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 				endpoint, ctx.App.Name))
 		}
 		if transport == nil {
-			transport = clientTransport(ctx, target.Scheme == "https")
+			transport = clientTransport(ctx, target.Scheme == "https", hostName)
 		}
 		// this is only used if r.RemoteAddr is localhost which means that
 		// sidekick endpoint being accessed is 127.0.0.x
