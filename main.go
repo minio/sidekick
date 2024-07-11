@@ -480,9 +480,6 @@ func (m *multisite) populate() {
 	}, 0)
 
 	cellText := make([][]string, len(dspOrder))
-	for i := range dspOrder {
-		cellText[i] = make([]string, len(headers))
-	}
 	cellText[0] = headers
 	for i, site := range sites {
 		for j, b := range site.backends {
