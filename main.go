@@ -423,9 +423,8 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 }
 
 type multisite struct {
-	sites          []*site
+	sites          atomic.Pointer[[]*site]
 	healthCanceler context.CancelFunc
-	rwLocker       sync.RWMutex
 }
 
 func (m *multisite) renewSite(ctx *cli.Context, healthCheckPath string, healthReadCheckPath string, healthCheckPort int, healthCheckDuration, healthCheckTimeout time.Duration) {
@@ -438,9 +437,7 @@ func (m *multisite) renewSite(ctx *cli.Context, healthCheckPath string, healthRe
 		site := configureSite(ctxt, ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout)
 		sites = append(sites, site)
 	}
-	m.rwLocker.Lock()
-	defer m.rwLocker.Unlock()
-	m.sites = sites
+	m.sites.Store(&sites)
 	// cancel the previous health checker
 	if m.healthCanceler != nil {
 		m.healthCanceler()
@@ -464,12 +461,11 @@ func (m *multisite) displayUI(show bool) {
 }
 
 func (m *multisite) populate() {
-	m.rwLocker.RLock()
-	defer m.rwLocker.RUnlock()
+	sites := *m.sites.Load()
 
 	dspOrder := []col{colGreen} // Header
-	for i := 0; i < len(m.sites); i++ {
-		for range m.sites[i].backends {
+	for i := 0; i < len(sites); i++ {
+		for range sites[i].backends {
 			dspOrder = append(dspOrder, colGrey)
 		}
 	}
@@ -488,7 +484,7 @@ func (m *multisite) populate() {
 		cellText[i] = make([]string, len(headers))
 	}
 	cellText[0] = headers
-	for i, site := range m.sites {
+	for i, site := range sites {
 		for j, b := range site.backends {
 			b.Stats.Lock()
 			minLatency := "0s"
@@ -497,17 +493,18 @@ func (m *multisite) populate() {
 				minLatency = fmt.Sprintf("%2s", b.Stats.MinLatency.Round(time.Microsecond))
 				maxLatency = fmt.Sprintf("%2s", b.Stats.MaxLatency.Round(time.Microsecond))
 			}
-			cellText[i*len(site.backends)+j+1][0] = humanize.Ordinal(b.siteNumber)
-			cellText[i*len(site.backends)+j+1][1] = b.endpoint
-			cellText[i*len(site.backends)+j+1][2] = b.getServerStatus()
-			cellText[i*len(site.backends)+j+1][3] = strconv.FormatInt(b.Stats.TotCalls, 10)
-			cellText[i*len(site.backends)+j+1][4] = strconv.FormatInt(b.Stats.TotCallFailures, 10)
-			cellText[i*len(site.backends)+j+1][5] = humanize.IBytes(uint64(b.Stats.Rx))
-			cellText[i*len(site.backends)+j+1][6] = humanize.IBytes(uint64(b.Stats.Tx))
-			cellText[i*len(site.backends)+j+1][7] = b.Stats.CumDowntime.Round(time.Microsecond).String()
-			cellText[i*len(site.backends)+j+1][8] = b.Stats.LastDowntime.Round(time.Microsecond).String()
-			cellText[i*len(site.backends)+j+1][9] = minLatency
-			cellText[i*len(site.backends)+j+1][10] = maxLatency
+			index := i*len(site.backends) + j + 1
+			cellText[index][0] = humanize.Ordinal(b.siteNumber)
+			cellText[index][1] = b.endpoint
+			cellText[index][2] = b.getServerStatus()
+			cellText[index][3] = strconv.FormatInt(b.Stats.TotCalls, 10)
+			cellText[index][4] = strconv.FormatInt(b.Stats.TotCallFailures, 10)
+			cellText[index][5] = humanize.IBytes(uint64(b.Stats.Rx))
+			cellText[index][6] = humanize.IBytes(uint64(b.Stats.Tx))
+			cellText[index][7] = b.Stats.CumDowntime.Round(time.Microsecond).String()
+			cellText[index][8] = b.Stats.LastDowntime.Round(time.Microsecond).String()
+			cellText[index][9] = minLatency
+			cellText[index][10] = maxLatency
 			b.Stats.Unlock()
 		}
 	}
@@ -517,9 +514,7 @@ func (m *multisite) populate() {
 
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Server", "SideKick") // indicate sidekick is serving
-	m.rwLocker.RLock()
-	defer m.rwLocker.RUnlock()
-	for _, s := range m.sites {
+	for _, s := range *m.sites.Load() {
 		if s.Online() {
 			if r.URL.Path == healthPath {
 				// Health check endpoint should return success
