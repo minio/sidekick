@@ -493,18 +493,19 @@ func (m *multisite) populate() {
 				minLatency = fmt.Sprintf("%2s", b.Stats.MinLatency.Round(time.Microsecond))
 				maxLatency = fmt.Sprintf("%2s", b.Stats.MaxLatency.Round(time.Microsecond))
 			}
-			index := i*len(site.backends) + j + 1
-			cellText[index][0] = humanize.Ordinal(b.siteNumber)
-			cellText[index][1] = b.endpoint
-			cellText[index][2] = b.getServerStatus()
-			cellText[index][3] = strconv.FormatInt(b.Stats.TotCalls, 10)
-			cellText[index][4] = strconv.FormatInt(b.Stats.TotCallFailures, 10)
-			cellText[index][5] = humanize.IBytes(uint64(b.Stats.Rx))
-			cellText[index][6] = humanize.IBytes(uint64(b.Stats.Tx))
-			cellText[index][7] = b.Stats.CumDowntime.Round(time.Microsecond).String()
-			cellText[index][8] = b.Stats.LastDowntime.Round(time.Microsecond).String()
-			cellText[index][9] = minLatency
-			cellText[index][10] = maxLatency
+			cellText[i*len(site.backends)+j+1] = []string{
+				humanize.Ordinal(b.siteNumber),
+				b.endpoint,
+				b.getServerStatus(),
+				strconv.FormatInt(b.Stats.TotCalls, 10),
+				strconv.FormatInt(b.Stats.TotCallFailures, 10),
+				humanize.IBytes(uint64(b.Stats.Rx)),
+				humanize.IBytes(uint64(b.Stats.Tx)),
+				b.Stats.CumDowntime.Round(time.Microsecond).String(),
+				b.Stats.LastDowntime.Round(time.Microsecond).String(),
+				minLatency,
+				maxLatency,
+			}
 			b.Stats.Unlock()
 		}
 	}
