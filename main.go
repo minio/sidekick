@@ -65,18 +65,17 @@ const (
 )
 
 var (
-	globalQuietEnabled     bool
-	globalDebugEnabled     bool
-	globalLoggingEnabled   bool
-	globalTrace            string
-	globalJSONEnabled      bool
-	globalConsoleDisplay   bool
-	globalErrorsOnly       bool
-	globalStatusCodes      []int
-	globalConnStatsRWMutex sync.RWMutex
-	globalConnStats        []*ConnStats
-	log2                   *logrus.Logger
-	globalHostBalance      string
+	globalQuietEnabled   bool
+	globalDebugEnabled   bool
+	globalLoggingEnabled bool
+	globalTrace          string
+	globalJSONEnabled    bool
+	globalConsoleDisplay bool
+	globalErrorsOnly     bool
+	globalStatusCodes    []int
+	globalConnStats      atomic.Pointer[[]*ConnStats]
+	log2                 *logrus.Logger
+	globalHostBalance    string
 )
 
 const (
@@ -401,12 +400,7 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 	b.Stats.MinLatency = time.Duration(int64(math.Min(float64(b.Stats.MinLatency), float64(t.CallStats.Latency))))
 	b.Stats.Rx += int64(t.CallStats.Rx)
 	b.Stats.Tx += int64(t.CallStats.Tx)
-	// automatically update the global stats
-	// Read/Write Lock is not required here
-	globalConnStatsRWMutex.RLock()
-	connStats := globalConnStats
-	globalConnStatsRWMutex.RUnlock()
-	for _, c := range connStats {
+	for _, c := range *globalConnStats.Load() {
 		if c == nil {
 			continue
 		}
@@ -863,10 +857,7 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 	var backends []*Backend
 	var prevScheme string
 	var transport http.RoundTripper
-	globalConnStatsRWMutex.Lock()
-	defer globalConnStatsRWMutex.Unlock()
-	// reset connstats
-	globalConnStats = []*ConnStats{}
+	var connStats []*ConnStats
 	if len(endpoints) == 1 && ctx.GlobalBool("rr-dns-mode") {
 		// guess it is LB config address
 		target, err := url.Parse(endpoints[0])
@@ -940,9 +931,9 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 		go backend.healthCheck(ctxt)
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
-		globalConnStats = append(globalConnStats, newConnStats(endpoint))
+		connStats = append(connStats, newConnStats(endpoint))
 	}
-
+	globalConnStats.Store(&connStats)
 	return &site{
 		backends: backends,
 	}
