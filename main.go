@@ -739,7 +739,7 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 		tr.TLSClientConfig = &tls.Config{
 			RootCAs:            getCertPool(ctx.GlobalString("cacert")),
 			Certificates:       getCertKeyPair(ctx.GlobalString("client-cert"), ctx.GlobalString("client-key")),
-			InsecureSkipVerify: ctx.GlobalBool("insecure"),
+			InsecureSkipVerify: ctx.GlobalBool("insecure") || ctx.GlobalBool("rr-dns-mode"),
 			// Can't use SSLv3 because of POODLE and BEAST
 			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
 			// Can't use TLSv1.1 because of RC4 cipher usage
@@ -874,7 +874,7 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 	defer globalConnStatsRWMutex.Unlock()
 	// reset connstats
 	globalConnStats = []*ConnStats{}
-	if len(endpoints) == 1 {
+	if len(endpoints) == 1 && ctx.GlobalBool("rr-dns-mode") {
 		// guess it is LB config address
 		target, err := url.Parse(endpoints[0])
 		if err != nil {
@@ -1140,6 +1140,10 @@ func main() {
 		cli.BoolFlag{
 			Name:  "insecure, i",
 			Usage: "disable TLS certificate verification",
+		},
+		cli.BoolFlag{
+			Name:  "rr-dns-mode",
+			Usage: "enable round-robin DNS mode",
 		},
 		cli.BoolFlag{
 			Name:  "log, l",
