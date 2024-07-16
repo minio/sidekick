@@ -374,7 +374,7 @@ func (b *Backend) doHealthCheck() error {
 	}
 	if globalTrace != "application" {
 		if resp != nil {
-			traceHealthCheckReq(req, resp, reqTime, respTime, b)
+			traceHealthCheckReq(req, resp, reqTime, respTime, b, err)
 		}
 	}
 
@@ -413,6 +413,9 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 		c.setOutputBytes(b.Stats.Tx)
 		c.setTotalCalls(b.Stats.TotCalls)
 		c.setTotalCallFailures(b.Stats.TotCallFailures)
+		if t.CallStats.HealthError != nil {
+			c.addHealthErrorCounts(1)
+		}
 	}
 }
 

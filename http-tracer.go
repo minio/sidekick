@@ -177,13 +177,13 @@ func (r *recordRequest) Data() []byte {
 	return BodyPlaceHolder
 }
 
-func traceHealthCheckReq(req *http.Request, resp *http.Response, reqTime, respTime time.Time, backend *Backend) {
-	ti := InternalTrace(req, resp, reqTime, respTime, backend.endpoint)
+func traceHealthCheckReq(req *http.Request, resp *http.Response, reqTime, respTime time.Time, backend *Backend, err error) {
+	ti := InternalTrace(req, resp, reqTime, respTime, backend.endpoint, err)
 	doTrace(ti, backend)
 }
 
 // InternalTrace returns trace for sidekick http requests
-func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime time.Time, endpoint string) TraceInfo {
+func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime time.Time, endpoint string, healthError error) TraceInfo {
 	t := TraceInfo{}
 	t.NodeName = endpoint
 	reqHeaders := req.Header.Clone()
@@ -216,7 +216,8 @@ func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime tim
 	t.RespInfo = rs
 
 	t.CallStats = traceCallStats{
-		Latency: rs.Time.Sub(rq.Time),
+		Latency:     rs.Time.Sub(rq.Time),
+		HealthError: healthError,
 	}
 
 	t.Type = TraceMsgType
@@ -411,6 +412,7 @@ func shortTrace(t TraceInfo) shortTraceMsg {
 	s.CallStats.Latency = t.CallStats.Latency
 	s.CallStats.Rx = t.CallStats.Rx
 	s.CallStats.Tx = t.CallStats.Tx
+	s.CallStats.HealthError = t.CallStats.HealthError
 	s.Path = t.ReqInfo.Path
 	s.Query = t.ReqInfo.RawQuery
 	s.Method = t.ReqInfo.Method
@@ -471,6 +473,7 @@ type traceCallStats struct {
 	Tx              int           `json:"tx"`
 	Latency         time.Duration `json:"latency"`
 	TimeToFirstByte time.Duration `json:"timetofirstbyte"`
+	HealthError     error         `json:"healthError"`
 }
 
 // traceRequestInfo represents trace of http request

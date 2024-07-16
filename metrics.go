@@ -92,6 +92,16 @@ func (c *sidekickCollector) Collect(ch chan<- prometheus.Metric) {
 			float64(c.getTotalOutputBytes()),
 			c.endpoint,
 		)
+
+		ch <- prometheus.MustNewConstMetric(
+			prometheus.NewDesc(
+				prometheus.BuildFQName("sidekick", "health", "error_counts"),
+				"Total number of health check errors",
+				[]string{"endpoint"}, nil),
+			prometheus.CounterValue,
+			float64(c.getHealthErrorCount()),
+			c.endpoint,
+		)
 	}
 }
 
@@ -119,18 +129,24 @@ func metricsHandler() (http.Handler, error) {
 
 // ConnStats - statistics on backend
 type ConnStats struct {
-	endpoint         string
-	totalInputBytes  atomic.Uint64
-	totalOutputBytes atomic.Uint64
-	totalCalls       atomic.Uint64
-	totalFailedCalls atomic.Uint64
-	minLatency       atomic.Duration
-	maxLatency       atomic.Duration
+	endpoint          string
+	totalInputBytes   atomic.Uint64
+	totalOutputBytes  atomic.Uint64
+	totalCalls        atomic.Uint64
+	totalFailedCalls  atomic.Uint64
+	minLatency        atomic.Duration
+	maxLatency        atomic.Duration
+	healthErrorCounts atomic.Uint64
 }
 
 // Store current total input bytes
 func (s *ConnStats) setInputBytes(n int64) {
 	s.totalInputBytes.Store(uint64(n))
+}
+
+// Add current health error count
+func (s *ConnStats) addHealthErrorCounts(n int64) {
+	s.healthErrorCounts.Add(uint64(n))
 }
 
 // Store current total output bytes
@@ -166,6 +182,11 @@ func (s *ConnStats) setMaxLatency(mx time.Duration) {
 // Return total output bytes
 func (s *ConnStats) getTotalOutputBytes() uint64 {
 	return s.totalOutputBytes.Load()
+}
+
+// Return total health error count
+func (s *ConnStats) getHealthErrorCount() uint64 {
+	return s.healthErrorCounts.Load()
 }
 
 // Prepare new ConnStats structure
