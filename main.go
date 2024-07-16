@@ -424,14 +424,22 @@ type multisite struct {
 	healthCanceler context.CancelFunc
 }
 
-func (m *multisite) renewSite(ctx *cli.Context, healthCheckPath string, healthReadCheckPath string, healthCheckPort int, healthCheckDuration, healthCheckTimeout time.Duration) {
+type healthCheckOptions struct {
+	healthCheckPath     string
+	healthReadCheckPath string
+	healthCheckPort     int
+	healthCheckDuration time.Duration
+	healthCheckTimeout  time.Duration
+}
+
+func (m *multisite) renewSite(ctx *cli.Context, opts healthCheckOptions) {
 	ctxt, cancel := context.WithCancel(context.Background())
 	var sites []*site
 	for i, siteStrs := range ctx.Args() {
 		if i == len(ctx.Args())-1 {
-			healthCheckPath = healthReadCheckPath
+			opts.healthCheckPath = opts.healthReadCheckPath
 		}
-		site := configureSite(ctxt, ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout)
+		site := configureSite(ctxt, ctx, i+1, strings.Split(siteStrs, ","), opts)
 		sites = append(sites, site)
 	}
 	m.sites.Store(&sites)
@@ -837,7 +845,7 @@ func IsLoopback(addr string) bool {
 	return net.ParseIP(host).IsLoopback()
 }
 
-func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration, healthCheckTimeout time.Duration) *site {
+func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs []string, opts healthCheckOptions) *site {
 	var endpoints []string
 
 	if ellipses.HasEllipses(siteStrs...) {
@@ -927,13 +935,13 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 			ModifyResponse: modifyResponse(),
 		}
 		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0}
-		healthCheckURL, err := getHealthCheckURL(endpoint, healthCheckPath, healthCheckPort)
+		healthCheckURL, err := getHealthCheckURL(endpoint, opts.healthCheckPath, opts.healthCheckPort)
 		if err != nil {
 			console.Fatalln(err)
 		}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckURL, healthCheckDuration, healthCheckTimeout, &stats}
+		}, 0, healthCheckURL, opts.healthCheckDuration, opts.healthCheckTimeout, &stats}
 		go backend.healthCheck(ctxt)
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
@@ -1042,7 +1050,7 @@ func sidekickMain(ctx *cli.Context) {
 	}
 
 	m := &multisite{}
-	m.renewSite(ctx, healthCheckPath, healthReadCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout)
+	m.renewSite(ctx, healthCheckOptions{healthCheckPath, healthReadCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout})
 	m.displayUI(!globalConsoleDisplay)
 
 	router.PathPrefix(slashSeparator).Handler(m)
@@ -1080,7 +1088,7 @@ func sidekickMain(ctx *cli.Context) {
 	for signal := range osSignalChannel {
 		switch signal {
 		case syscall.SIGHUP:
-			m.renewSite(ctx, healthCheckPath, healthReadCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout)
+			m.renewSite(ctx, healthCheckOptions{healthCheckPath, healthReadCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout})
 		default:
 			console.Infof("caught signal '%s'\n", signal)
 			os.Exit(1)
