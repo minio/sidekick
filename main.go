@@ -31,11 +31,13 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -71,7 +73,7 @@ var (
 	globalConsoleDisplay bool
 	globalErrorsOnly     bool
 	globalStatusCodes    []int
-	globalConnStats      []*ConnStats
+	globalConnStats      atomic.Pointer[[]*ConnStats]
 	log2                 *logrus.Logger
 	globalHostBalance    string
 )
@@ -305,14 +307,19 @@ func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) (s
 }
 
 // healthCheck - background routine which checks if a backend is up or down.
-func (b *Backend) healthCheck() {
+func (b *Backend) healthCheck(ctxt context.Context) {
+	ticker := time.NewTicker(b.healthCheckDuration)
+	defer ticker.Stop()
 	for {
-		err := b.doHealthCheck()
-		if err != nil {
-			console.Fatalln(err)
+		select {
+		case <-ctxt.Done():
+			return
+		case <-ticker.C:
+			err := b.doHealthCheck()
+			if err != nil {
+				console.Errorln(err)
+			}
 		}
-
-		time.Sleep(b.healthCheckDuration)
 	}
 }
 
@@ -367,7 +374,7 @@ func (b *Backend) doHealthCheck() error {
 	}
 	if globalTrace != "application" {
 		if resp != nil {
-			traceHealthCheckReq(req, resp, reqTime, respTime, b)
+			traceHealthCheckReq(req, resp, reqTime, respTime, b, err)
 		}
 	}
 
@@ -393,7 +400,7 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 	b.Stats.MinLatency = time.Duration(int64(math.Min(float64(b.Stats.MinLatency), float64(t.CallStats.Latency))))
 	b.Stats.Rx += int64(t.CallStats.Rx)
 	b.Stats.Tx += int64(t.CallStats.Tx)
-	for _, c := range globalConnStats {
+	for _, c := range *globalConnStats.Load() {
 		if c == nil {
 			continue
 		}
@@ -406,40 +413,111 @@ func (b *Backend) updateCallStats(t shortTraceMsg) {
 		c.setOutputBytes(b.Stats.Tx)
 		c.setTotalCalls(b.Stats.TotCalls)
 		c.setTotalCallFailures(b.Stats.TotCallFailures)
+		if t.CallStats.HealthError != nil {
+			c.addHealthErrorCounts(1)
+		}
 	}
 }
 
 type multisite struct {
-	sites []*site
+	sites          atomic.Pointer[[]*site]
+	healthCanceler context.CancelFunc
 }
 
-func (m *multisite) populate(cellText [][]string) {
-	for i, site := range m.sites {
+type healthCheckOptions struct {
+	healthCheckPath     string
+	healthReadCheckPath string
+	healthCheckPort     int
+	healthCheckDuration time.Duration
+	healthCheckTimeout  time.Duration
+}
+
+func (m *multisite) renewSite(ctx *cli.Context, opts healthCheckOptions) {
+	ctxt, cancel := context.WithCancel(context.Background())
+	var sites []*site
+	for i, siteStrs := range ctx.Args() {
+		if i == len(ctx.Args())-1 {
+			opts.healthCheckPath = opts.healthReadCheckPath
+		}
+		site := configureSite(ctxt, ctx, i+1, strings.Split(siteStrs, ","), opts)
+		sites = append(sites, site)
+	}
+	m.sites.Store(&sites)
+	// cancel the previous health checker
+	if m.healthCanceler != nil {
+		m.healthCanceler()
+	}
+	m.healthCanceler = cancel
+}
+
+func (m *multisite) displayUI(show bool) {
+	if !show {
+		return
+	}
+	go func() {
+		// Clear screen before we start the table UI
+		clearScreen()
+
+		ticker := time.NewTicker(500 * time.Millisecond)
+		for range ticker.C {
+			m.populate()
+		}
+	}()
+}
+
+func (m *multisite) populate() {
+	sites := *m.sites.Load()
+
+	dspOrder := []col{colGreen} // Header
+	for i := 0; i < len(sites); i++ {
+		for range sites[i].backends {
+			dspOrder = append(dspOrder, colGrey)
+		}
+	}
+	var printColors []*color.Color
+	for _, c := range dspOrder {
+		printColors = append(printColors, getPrintCol(c))
+	}
+
+	tbl := console.NewTable(printColors, []bool{
+		false, false, false, false, false, false,
+		false, false, false, false, false,
+	}, 0)
+
+	cellText := make([][]string, len(dspOrder))
+	cellText[0] = headers
+	for i, site := range sites {
 		for j, b := range site.backends {
+			b.Stats.Lock()
 			minLatency := "0s"
 			maxLatency := "0s"
 			if b.Stats.MaxLatency > 0 {
 				minLatency = fmt.Sprintf("%2s", b.Stats.MinLatency.Round(time.Microsecond))
 				maxLatency = fmt.Sprintf("%2s", b.Stats.MaxLatency.Round(time.Microsecond))
 			}
-			cellText[i*len(site.backends)+j][0] = humanize.Ordinal(b.siteNumber)
-			cellText[i*len(site.backends)+j][1] = b.endpoint
-			cellText[i*len(site.backends)+j][2] = b.getServerStatus()
-			cellText[i*len(site.backends)+j][3] = strconv.FormatInt(b.Stats.TotCalls, 10)
-			cellText[i*len(site.backends)+j][4] = strconv.FormatInt(b.Stats.TotCallFailures, 10)
-			cellText[i*len(site.backends)+j][5] = humanize.IBytes(uint64(b.Stats.Rx))
-			cellText[i*len(site.backends)+j][6] = humanize.IBytes(uint64(b.Stats.Tx))
-			cellText[i*len(site.backends)+j][7] = b.Stats.CumDowntime.Round(time.Microsecond).String()
-			cellText[i*len(site.backends)+j][8] = b.Stats.LastDowntime.Round(time.Microsecond).String()
-			cellText[i*len(site.backends)+j][9] = minLatency
-			cellText[i*len(site.backends)+j][10] = maxLatency
+			cellText[i*len(site.backends)+j+1] = []string{
+				humanize.Ordinal(b.siteNumber),
+				b.endpoint,
+				b.getServerStatus(),
+				strconv.FormatInt(b.Stats.TotCalls, 10),
+				strconv.FormatInt(b.Stats.TotCallFailures, 10),
+				humanize.IBytes(uint64(b.Stats.Rx)),
+				humanize.IBytes(uint64(b.Stats.Tx)),
+				b.Stats.CumDowntime.Round(time.Microsecond).String(),
+				b.Stats.LastDowntime.Round(time.Microsecond).String(),
+				minLatency,
+				maxLatency,
+			}
+			b.Stats.Unlock()
 		}
 	}
+	console.RewindLines(len(cellText) + 2)
+	tbl.DisplayTable(cellText)
 }
 
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Server", "SideKick") // indicate sidekick is serving
-	for _, s := range m.sites {
+	for _, s := range *m.sites.Load() {
 		if s.Online() {
 			if r.URL.Path == healthPath {
 				// Health check endpoint should return success
@@ -635,7 +713,7 @@ func newProxyDialContext(dialTimeout time.Duration) DialContext {
 // tlsClientSessionCacheSize is the cache size for TLS client sessions.
 const tlsClientSessionCacheSize = 100
 
-func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
+func clientTransport(ctx *cli.Context, enableTLS bool, hostName string) http.RoundTripper {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           dialContextWithDNSCache(dnsCache, newProxyDialContext(10*time.Second)),
@@ -666,6 +744,7 @@ func clientTransport(ctx *cli.Context, enableTLS bool) http.RoundTripper {
 			MinVersion:               tls.VersionTLS12,
 			PreferServerCipherSuites: true,
 			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
+			ServerName:               hostName,
 		}
 	}
 
@@ -766,7 +845,7 @@ func IsLoopback(addr string) bool {
 	return net.ParseIP(host).IsLoopback()
 }
 
-func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheckPath string, healthCheckPort int, healthCheckDuration, healthCheckTimeout time.Duration) *site {
+func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs []string, opts healthCheckOptions) *site {
 	var endpoints []string
 
 	if ellipses.HasEllipses(siteStrs...) {
@@ -790,6 +869,26 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 	var backends []*Backend
 	var prevScheme string
 	var transport http.RoundTripper
+	var connStats []*ConnStats
+	var hostName string
+	if len(endpoints) == 1 && ctx.GlobalBool("rr-dns-mode") {
+		console.Infof("RR DNS mode enabled, using %s as hostname", endpoints[0])
+		// guess it is LB config address
+		target, err := url.Parse(endpoints[0])
+		if err != nil {
+			console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", endpoints[0], err))
+		}
+		hostName = target.Hostname()
+		ips, err := net.LookupHost(hostName)
+		if err != nil {
+			console.Fatalln(fmt.Errorf("Unable to lookup host %s", hostName))
+		}
+		// set the new endpoints
+		endpoints = []string{}
+		for _, ip := range ips {
+			endpoints = append(endpoints, strings.Replace(target.String(), hostName, ip, 1))
+		}
+	}
 	for _, endpoint := range endpoints {
 		endpoint = strings.TrimSuffix(endpoint, slashSeparator)
 		target, err := url.Parse(endpoint)
@@ -815,7 +914,7 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 				endpoint, ctx.App.Name))
 		}
 		if transport == nil {
-			transport = clientTransport(ctx, target.Scheme == "https")
+			transport = clientTransport(ctx, target.Scheme == "https", hostName)
 		}
 		// this is only used if r.RemoteAddr is localhost which means that
 		// sidekick endpoint being accessed is 127.0.0.x
@@ -836,19 +935,19 @@ func configureSite(ctx *cli.Context, siteNum int, siteStrs []string, healthCheck
 			ModifyResponse: modifyResponse(),
 		}
 		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0}
-		healthCheckURL, err := getHealthCheckURL(endpoint, healthCheckPath, healthCheckPort)
+		healthCheckURL, err := getHealthCheckURL(endpoint, opts.healthCheckPath, opts.healthCheckPort)
 		if err != nil {
 			console.Fatalln(err)
 		}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckURL, healthCheckDuration, healthCheckTimeout, &stats}
-		go backend.healthCheck()
+		}, 0, healthCheckURL, opts.healthCheckDuration, opts.healthCheckTimeout, &stats}
+		go backend.healthCheck(ctxt)
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
-		globalConnStats = append(globalConnStats, newConnStats(endpoint))
+		connStats = append(connStats, newConnStats(endpoint))
 	}
-
+	globalConnStats.Store(&connStats)
 	return &site{
 		backends: backends,
 	}
@@ -922,16 +1021,6 @@ func sidekickMain(ctx *cli.Context) {
 		healthReadCheckPath = slashSeparator + healthReadCheckPath
 	}
 
-	var sites []*site
-	for i, siteStrs := range ctx.Args() {
-		if i == len(ctx.Args())-1 {
-			healthCheckPath = healthReadCheckPath
-		}
-
-		site := configureSite(ctx, i+1, strings.Split(siteStrs, ","), healthCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout)
-		sites = append(sites, site)
-	}
-
 	if globalConsoleDisplay {
 		console.SetColor("LogMsgType", color.New(color.FgHiMagenta))
 		console.SetColor("TraceMsgType", color.New(color.FgYellow))
@@ -960,42 +1049,9 @@ func sidekickMain(ctx *cli.Context) {
 		console.Fatalln(err)
 	}
 
-	m := &multisite{sites}
-	if !globalConsoleDisplay {
-		dspOrder := []col{colGreen} // Header
-		for i := 0; i < len(sites); i++ {
-			for range sites[i].backends {
-				dspOrder = append(dspOrder, colGrey)
-			}
-		}
-		var printColors []*color.Color
-		for _, c := range dspOrder {
-			printColors = append(printColors, getPrintCol(c))
-		}
-
-		tbl := console.NewTable(printColors, []bool{
-			false, false, false, false, false, false,
-			false, false, false, false, false,
-		}, 0)
-
-		cellText := make([][]string, len(dspOrder))
-		for i := range dspOrder {
-			cellText[i] = make([]string, len(headers))
-		}
-		cellText[0] = headers
-
-		go func() {
-			// Clear screen before we start the table UI
-			clearScreen()
-
-			ticker := time.NewTicker(500 * time.Millisecond)
-			for range ticker.C {
-				m.populate(cellText[1:])
-				console.RewindLines(len(cellText) + 2)
-				tbl.DisplayTable(cellText)
-			}
-		}()
-	}
+	m := &multisite{}
+	m.renewSite(ctx, healthCheckOptions{healthCheckPath, healthReadCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout})
+	m.displayUI(!globalConsoleDisplay)
 
 	router.PathPrefix(slashSeparator).Handler(m)
 	server := &http.Server{
@@ -1017,8 +1073,26 @@ func sidekickMain(ctx *cli.Context) {
 		}
 		server.TLSConfig = tlsConfig
 	}
-	if err := server.ListenAndServe(); err != nil {
-		console.Fatalln(err)
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			console.Fatalln(err)
+		}
+	}()
+	osSignalChannel := make(chan os.Signal, 1)
+	signal.Notify(
+		osSignalChannel,
+		syscall.SIGTERM,
+		syscall.SIGINT,
+		syscall.SIGHUP,
+	)
+	for signal := range osSignalChannel {
+		switch signal {
+		case syscall.SIGHUP:
+			m.renewSite(ctx, healthCheckOptions{healthCheckPath, healthReadCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout})
+		default:
+			console.Infof("caught signal '%s'\n", signal)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -1064,6 +1138,10 @@ func main() {
 		cli.BoolFlag{
 			Name:  "insecure, i",
 			Usage: "disable TLS certificate verification",
+		},
+		cli.BoolFlag{
+			Name:  "rr-dns-mode",
+			Usage: "enable round-robin DNS mode",
 		},
 		cli.BoolFlag{
 			Name:  "log, l",
