@@ -864,6 +864,7 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 	var connStats []*ConnStats
 	var hostName string
 	if len(endpoints) == 1 && ctx.GlobalBool("rr-dns-mode") {
+		console.Infof("RR DNS mode enabled, using %s as hostname", endpoints[0])
 		// guess it is LB config address
 		target, err := url.Parse(endpoints[0])
 		if err != nil {
