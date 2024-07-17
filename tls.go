@@ -72,6 +72,9 @@ func generateTLSCertKey(host string) ([]byte, []byte, error) {
 	var priv interface{}
 	var err error
 	priv, err = ecdsa.GenerateKey(elliptic.P256(), crand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate private key: %w", err)
+	}
 	notBefore := time.Now()
 	notAfter := notBefore.Add(validFor)
 
