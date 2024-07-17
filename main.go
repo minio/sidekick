@@ -432,14 +432,14 @@ type healthCheckOptions struct {
 	healthCheckTimeout  time.Duration
 }
 
-func (m *multisite) renewSite(ctx *cli.Context, opts healthCheckOptions) {
+func (m *multisite) renewSite(ctx *cli.Context, tlsMaxVersion uint16, opts healthCheckOptions) {
 	ctxt, cancel := context.WithCancel(context.Background())
 	var sites []*site
 	for i, siteStrs := range ctx.Args() {
 		if i == len(ctx.Args())-1 {
 			opts.healthCheckPath = opts.healthReadCheckPath
 		}
-		site := configureSite(ctxt, ctx, i+1, strings.Split(siteStrs, ","), opts)
+		site := configureSite(ctxt, ctx, i+1, strings.Split(siteStrs, ","), tlsMaxVersion, opts)
 		sites = append(sites, site)
 	}
 	m.sites.Store(&sites)
@@ -713,7 +713,7 @@ func newProxyDialContext(dialTimeout time.Duration) DialContext {
 // tlsClientSessionCacheSize is the cache size for TLS client sessions.
 const tlsClientSessionCacheSize = 100
 
-func clientTransport(ctx *cli.Context, enableTLS bool, hostName string) http.RoundTripper {
+func clientTransport(ctx *cli.Context, tlsMaxVersion uint16, enableTLS bool, hostName string) http.RoundTripper {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           dialContextWithDNSCache(dnsCache, newProxyDialContext(10*time.Second)),
@@ -735,13 +735,11 @@ func clientTransport(ctx *cli.Context, enableTLS bool, hostName string) http.Rou
 	if enableTLS {
 		// Keep TLS config.
 		tr.TLSClientConfig = &tls.Config{
-			RootCAs:            getCertPool(ctx.GlobalString("cacert")),
-			Certificates:       getCertKeyPair(ctx.GlobalString("client-cert"), ctx.GlobalString("client-key")),
-			InsecureSkipVerify: ctx.GlobalBool("insecure"),
-			// Can't use SSLv3 because of POODLE and BEAST
-			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
-			// Can't use TLSv1.1 because of RC4 cipher usage
+			RootCAs:                  getCertPool(ctx.GlobalString("cacert")),
+			Certificates:             getCertKeyPair(ctx.GlobalString("client-cert"), ctx.GlobalString("client-key")),
+			InsecureSkipVerify:       ctx.GlobalBool("insecure"),
 			MinVersion:               tls.VersionTLS12,
+			MaxVersion:               tlsMaxVersion,
 			PreferServerCipherSuites: true,
 			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
 			ServerName:               hostName,
@@ -845,7 +843,7 @@ func IsLoopback(addr string) bool {
 	return net.ParseIP(host).IsLoopback()
 }
 
-func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs []string, opts healthCheckOptions) *site {
+func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs []string, tlsMaxVersion uint16, opts healthCheckOptions) *site {
 	var endpoints []string
 
 	if ellipses.HasEllipses(siteStrs...) {
@@ -914,7 +912,7 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 				endpoint, ctx.App.Name))
 		}
 		if transport == nil {
-			transport = clientTransport(ctx, target.Scheme == "https", hostName)
+			transport = clientTransport(ctx, tlsMaxVersion, target.Scheme == "https", hostName)
 		}
 		// this is only used if r.RemoteAddr is localhost which means that
 		// sidekick endpoint being accessed is 127.0.0.x
@@ -1001,6 +999,15 @@ func sidekickMain(ctx *cli.Context) {
 		globalHostBalance = "least"
 	}
 
+	tlsMaxVersion := uint16(tls.VersionTLS13)
+	switch tlsMax := ctx.GlobalString("tls-max"); tlsMax {
+	case "1.2":
+		tlsMaxVersion = tls.VersionTLS12
+	case "1.3":
+	default:
+		console.Fatalln(fmt.Errorf("invalid TLS max version specified '%s' - supported values [1.2, 1.3]", tlsMax))
+	}
+
 	go func() {
 		t := time.NewTicker(ctx.GlobalDuration("dns-ttl"))
 		defer t.Stop()
@@ -1050,7 +1057,13 @@ func sidekickMain(ctx *cli.Context) {
 	}
 
 	m := &multisite{}
-	m.renewSite(ctx, healthCheckOptions{healthCheckPath, healthReadCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout})
+	m.renewSite(ctx, tlsMaxVersion, healthCheckOptions{
+		healthCheckPath,
+		healthReadCheckPath,
+		healthCheckPort,
+		healthCheckDuration,
+		healthCheckTimeout,
+	})
 	m.displayUI(!globalConsoleDisplay)
 
 	router.PathPrefix(slashSeparator).Handler(m)
@@ -1069,6 +1082,7 @@ func sidekickMain(ctx *cli.Context) {
 			NextProtos:               []string{"http/1.1", "h2"},
 			GetCertificate:           manager.GetCertificate,
 			MinVersion:               tls.VersionTLS12,
+			MaxVersion:               tlsMaxVersion,
 			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
 		}
 		server.TLSConfig = tlsConfig
@@ -1088,7 +1102,13 @@ func sidekickMain(ctx *cli.Context) {
 	for signal := range osSignalChannel {
 		switch signal {
 		case syscall.SIGHUP:
-			m.renewSite(ctx, healthCheckOptions{healthCheckPath, healthReadCheckPath, healthCheckPort, healthCheckDuration, healthCheckTimeout})
+			m.renewSite(ctx, tlsMaxVersion, healthCheckOptions{
+				healthCheckPath,
+				healthReadCheckPath,
+				healthCheckPort,
+				healthCheckDuration,
+				healthCheckTimeout,
+			})
 		default:
 			console.Infof("caught signal '%s'\n", signal)
 			os.Exit(1)
@@ -1205,6 +1225,12 @@ func main() {
 			Name:  "host-balance",
 			Usage: "specify the algorithm to select backend host when load balancing, supported values are 'least', 'random'",
 			Value: "least",
+		},
+		cli.StringFlag{
+			Name:   "tls-max",
+			Usage:  "specify maximum supported TLS version",
+			Value:  "1.3",
+			Hidden: true,
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
