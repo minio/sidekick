@@ -17,10 +17,6 @@ require (
 	golang.org/x/term v0.21.0
 )
 
-// tview upstream is broken after this commit, so please avoid upgrading
-// until you verify all UI elements are working properly.
-replace github.com/rivo/tview => github.com/rivo/tview v0.0.0-20231126123532-b11bfc7683c7
-
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
