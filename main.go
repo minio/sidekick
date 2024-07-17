@@ -1086,6 +1086,27 @@ func sidekickMain(ctx *cli.Context) {
 			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
 		}
 		server.TLSConfig = tlsConfig
+	} else if ctx.String("auto-tls-host") != "" {
+		cert, key, err := generateTLSCertKey(ctx.String("auto-tls-host"))
+		if err != nil {
+			console.Fatalln(err)
+		}
+		console.Printf("Generated TLS certificate for host '%s'\n", ctx.String("auto-tls-host"))
+		console.Printf("certFile:\n%s\n", string(cert))
+		console.Printf("keyFile:\n%s\n", string(key))
+		certificates, err := tls.X509KeyPair(cert, key)
+		if err != nil {
+			console.Fatalln(err)
+		}
+		tlsConfig := &tls.Config{
+			PreferServerCipherSuites: true,
+			NextProtos:               []string{"http/1.1", "h2"},
+			Certificates:             []tls.Certificate{certificates},
+			MinVersion:               tls.VersionTLS12,
+			MaxVersion:               tlsMaxVersion,
+			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
+		}
+		server.TLSConfig = tlsConfig
 	}
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
@@ -1162,6 +1183,10 @@ func main() {
 		cli.BoolFlag{
 			Name:  "rr-dns-mode",
 			Usage: "enable round-robin DNS mode",
+		},
+		cli.StringFlag{
+			Name:  "auto-tls-host",
+			Usage: "enable auto TLS mode for the specified host",
 		},
 		cli.BoolFlag{
 			Name:  "log, l",
