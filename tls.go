@@ -18,6 +18,7 @@ package main
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	crand "crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -37,8 +38,6 @@ import (
 // https://golang.org/src/crypto/tls/generate_cert.go
 func generateTLSCertKey(host string) ([]byte, []byte, error) {
 	validFor := 365 * 24 * time.Hour
-	rsaBits := 2048
-
 	if len(host) == 0 {
 		return nil, nil, fmt.Errorf("Missing host parameter")
 	}
@@ -72,11 +71,7 @@ func generateTLSCertKey(host string) ([]byte, []byte, error) {
 
 	var priv interface{}
 	var err error
-	priv, err = rsa.GenerateKey(crand.Reader, rsaBits)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate private key: %w", err)
-	}
-
+	priv, err = ecdsa.GenerateKey(elliptic.P256(), crand.Reader)
 	notBefore := time.Now()
 	notAfter := notBefore.Add(validFor)
 
