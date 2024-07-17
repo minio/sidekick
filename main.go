@@ -1093,7 +1093,6 @@ func sidekickMain(ctx *cli.Context) {
 		}
 		console.Printf("Generated TLS certificate for host '%s'\n", ctx.String("auto-tls-host"))
 		console.Printf("certFile:\n%s\n", string(cert))
-		console.Printf("keyFile:\n%s\n", string(key))
 		certificates, err := tls.X509KeyPair(cert, key)
 		if err != nil {
 			console.Fatalln(err)
