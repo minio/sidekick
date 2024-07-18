@@ -525,7 +525,7 @@ func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cert := globalTLSCert.Load()
 		if cert != nil {
 			w.WriteHeader(200)
-			w.Write(*globalTLSCert.Load())
+			w.Write(*cert)
 		} else {
 			w.WriteHeader(200)
 			w.Write([]byte("No certificates found"))
