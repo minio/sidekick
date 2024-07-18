@@ -521,14 +521,12 @@ func (m *multisite) populate() {
 }
 
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == certificatesPath {
+	if r.Method == http.MethodGet && r.URL.Path == certificatesPath {
 		cert := globalTLSCert.Load()
 		if cert != nil {
-			w.WriteHeader(200)
 			w.Write(*cert)
 		} else {
-			w.WriteHeader(200)
-			w.Write([]byte("No certificates found"))
+			http.Error(w, "no configured certificates found", http.StatusNotFound)
 		}
 		return
 	}
