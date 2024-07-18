@@ -17,8 +17,11 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,8 +63,9 @@ import (
 var version = "0.0.0-dev"
 
 const (
-	slashSeparator = "/"
-	healthPath     = "/v1/health"
+	slashSeparator   = "/"
+	healthPath       = "/v1/health"
+	certificatesPath = "/v1/certificates"
 )
 
 var (
@@ -76,6 +80,7 @@ var (
 	globalConnStats      atomic.Pointer[[]*ConnStats]
 	log2                 *logrus.Logger
 	globalHostBalance    string
+	globalTLSCert        atomic.Pointer[[]byte]
 )
 
 const (
@@ -516,15 +521,26 @@ func (m *multisite) populate() {
 }
 
 func (m *multisite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Path == certificatesPath {
+		cert := globalTLSCert.Load()
+		if cert != nil {
+			w.Write(*cert)
+		} else {
+			http.Error(w, "no configured certificates found", http.StatusNotFound)
+		}
+		return
+	}
 	w.Header().Set("Server", "SideKick") // indicate sidekick is serving
 	for _, s := range *m.sites.Load() {
 		if s.Online() {
-			if r.URL.Path == healthPath {
+			switch r.URL.Path {
+			case healthPath:
 				// Health check endpoint should return success
 				return
+			default:
+				s.ServeHTTP(w, r)
+				return
 			}
-			s.ServeHTTP(w, r)
-			return
 		}
 	}
 	writeErrorResponse(w, r, errors.New("all backend servers are offline"))
@@ -1086,6 +1102,43 @@ func sidekickMain(ctx *cli.Context) {
 			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
 		}
 		server.TLSConfig = tlsConfig
+	} else if ctx.String("auto-tls-host") != "" {
+		cert, key, err := generateTLSCertKey(ctx.String("auto-tls-host"))
+		if err != nil {
+			console.Fatalln(err)
+		}
+		console.Printf("Generated TLS certificate for host '%s'\n", ctx.String("auto-tls-host"))
+		certificates, err := tls.X509KeyPair(cert, key)
+		if err != nil {
+			console.Fatalln(err)
+		}
+		fingerprint := sha256.Sum256(certificates.Certificate[0])
+		console.Printf("\nCertificate: % X", fingerprint[:len(fingerprint)/2])
+		console.Printf("\n             % X", fingerprint[len(fingerprint)/2:])
+		var publicKeyDER []byte
+		switch privateKey := certificates.PrivateKey.(type) {
+		case *ecdsa.PrivateKey:
+			publicKeyDER, err = x509.MarshalPKIXPublicKey(privateKey.Public())
+		default:
+			console.Fatalln(fmt.Errorf("unsupported private key type %T", privateKey))
+		}
+		if err != nil {
+			console.Fatalln(err)
+		}
+		publicKey := sha256.Sum256(publicKeyDER)
+		console.Println("\nPublic Key:  " + base64.StdEncoding.EncodeToString(publicKey[:]))
+		console.Println()
+		globalTLSCert.Store(&cert)
+
+		tlsConfig := &tls.Config{
+			PreferServerCipherSuites: true,
+			NextProtos:               []string{"http/1.1", "h2"},
+			Certificates:             []tls.Certificate{certificates},
+			MinVersion:               tls.VersionTLS12,
+			MaxVersion:               tlsMaxVersion,
+			ClientSessionCache:       tls.NewLRUClientSessionCache(tlsClientSessionCacheSize),
+		}
+		server.TLSConfig = tlsConfig
 	}
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
@@ -1162,6 +1215,10 @@ func main() {
 		cli.BoolFlag{
 			Name:  "rr-dns-mode",
 			Usage: "enable round-robin DNS mode",
+		},
+		cli.StringFlag{
+			Name:  "auto-tls-host",
+			Usage: "enable auto TLS mode for the specified host",
 		},
 		cli.BoolFlag{
 			Name:  "log, l",
