@@ -1113,8 +1113,8 @@ func sidekickMain(ctx *cli.Context) {
 			console.Fatalln(err)
 		}
 		fingerprint := sha256.Sum256(certificates.Certificate[0])
-		console.Printf("\nCertificate: % X\n", fingerprint[:len(fingerprint)/2])
-		console.Printf("			 % X", fingerprint[len(fingerprint)/2:])
+		console.Printf("\nCertificate: % X", fingerprint[:len(fingerprint)/2])
+		console.Printf("\n             % X", fingerprint[len(fingerprint)/2:])
 		var publicKeyDER []byte
 		switch privateKey := certificates.PrivateKey.(type) {
 		case *ecdsa.PrivateKey:
