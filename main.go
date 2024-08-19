@@ -313,17 +313,18 @@ func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) (s
 
 // healthCheck - background routine which checks if a backend is up or down.
 func (b *Backend) healthCheck(ctxt context.Context) {
-	ticker := time.NewTicker(b.healthCheckDuration)
-	defer ticker.Stop()
+	timer := time.NewTimer(b.healthCheckDuration)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctxt.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			err := b.doHealthCheck()
 			if err != nil {
 				console.Errorln(err)
 			}
+			timer.Reset(b.healthCheckDuration)
 		}
 	}
 }
