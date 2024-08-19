@@ -1141,11 +1141,23 @@ func sidekickMain(ctx *cli.Context) {
 		}
 		server.TLSConfig = tlsConfig
 	}
+
+	var listener net.Listener
+	var err error
+	if server.TLSConfig != nil {
+		listener, err = tls.Listen("tcp", addr, server.TLSConfig)
+		if err != nil {
+			console.Fatalln(err)
+		}
+	} else {
+		listener, err = net.Listen("tcp", addr)
+	}
 	go func() {
-		if err := server.ListenAndServe(); err != nil {
+		if err := server.Serve(listener); err != nil {
 			console.Fatalln(err)
 		}
 	}()
+
 	osSignalChannel := make(chan os.Signal, 1)
 	signal.Notify(
 		osSignalChannel,
