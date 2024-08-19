@@ -768,7 +768,7 @@ func clientTransport(ctx *cli.Context, tlsMaxVersion uint16, enableTLS bool, hos
 
 func checkMain(ctx *cli.Context) {
 	if !ctx.Args().Present() {
-		cli.ShowCommandHelpAndExit(ctx, ctx.Command.Name, 1)
+		cli.ShowAppHelpAndExit(ctx, 1)
 	}
 }
 
@@ -1152,6 +1152,9 @@ func sidekickMain(ctx *cli.Context) {
 	} else {
 		listener, err = net.Listen("tcp", addr)
 	}
+	if err != nil {
+		console.Fatalln(err)
+	}
 	go func() {
 		if err := server.Serve(listener); err != nil {
 			console.Fatalln(err)
@@ -1186,13 +1189,19 @@ func main() {
 	// Set system resources to maximum.
 	setMaxResources()
 
+	cli.HelpFlag = cli.BoolFlag{
+		Name:  "help, h",
+		Usage: "show help",
+	}
+
 	app := cli.NewApp()
 	app.Name = os.Args[0]
+	app.HideHelpCommand = true // Hide `help, h` command, we already have `minio --help`.
 	app.Author = "MinIO, Inc."
 	app.Description = `High-Performance sidecar load-balancer`
 	app.UsageText = "[FLAGS] SITE1 [SITE2..]"
 	app.Version = version
-	app.Copyright = "(c) 2020-2023 MinIO, Inc."
+	app.Copyright = "(c) 2020-2024 MinIO, Inc."
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "address, a",
