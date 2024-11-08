@@ -1,4 +1,7 @@
-![sidekick](https://raw.githubusercontent.com/minio/sidekick/master/sidekick_logo.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/minio/sidekick/master/sidekick_logo_dark.png">
+  <img alt="sidekick" src="https://raw.githubusercontent.com/minio/sidekick/master/sidekick_logo.png"  >
+</picture>
 
 ![build](https://github.com/minio/sidekick/workflows/Go/badge.svg) ![license](https://img.shields.io/badge/license-AGPL%20V3-blue)
 
