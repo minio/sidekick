@@ -955,7 +955,7 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 			console.Fatalln(err)
 		}
 		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
-			Transport: proxy.Transport,
+			Transport: transport,
 		}, 0, healthCheckURL, opts.healthCheckDuration, opts.healthCheckTimeout, &stats}
 		go backend.healthCheck(ctxt)
 		proxy.ErrorHandler = backend.ErrorHandler
