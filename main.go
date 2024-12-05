@@ -313,6 +313,7 @@ func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) (s
 
 // healthCheck - background routine which checks if a backend is up or down.
 func (b *Backend) healthCheck(ctxt context.Context) {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	timer := time.NewTimer(b.healthCheckDuration)
 	defer timer.Stop()
 	for {
@@ -324,7 +325,8 @@ func (b *Backend) healthCheck(ctxt context.Context) {
 			if err != nil {
 				console.Errorln(err)
 			}
-			timer.Reset(b.healthCheckDuration)
+			// Add random jitter to call
+			timer.Reset(b.healthCheckDuration + time.Duration(rng.Int63n(int64(b.healthCheckDuration))))
 		}
 	}
 }
@@ -578,7 +580,7 @@ func (s *site) nextProxy() (*Backend, func()) {
 	}
 	switch globalHostBalance {
 	case "least":
-		min := int64(math.MaxInt64)
+		minCall := int64(math.MaxInt64)
 		earliest := int64(math.MaxInt64)
 		idx := 0
 		// Shuffle before picking the least connection to ensure all nodes
@@ -588,8 +590,8 @@ func (s *site) nextProxy() (*Backend, func()) {
 		})
 		for i, backend := range backends {
 			currentCalls := backend.Stats.CurrentCalls.Load()
-			if currentCalls < min {
-				min = currentCalls
+			if currentCalls < minCall {
+				minCall = currentCalls
 				lastFinished := backend.Stats.LastFinished.Load()
 				if lastFinished < earliest {
 					earliest = lastFinished
