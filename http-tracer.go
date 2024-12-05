@@ -228,7 +228,7 @@ func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime tim
 }
 
 // Trace gets trace of http request
-func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Request, endpoint string) TraceInfo {
+func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Request, backend *Backend) TraceInfo {
 	// Setup a http request body recorder
 	reqHeaders := r.Header.Clone()
 	reqHeaders.Set("Host", r.Host)
@@ -247,6 +247,20 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 	rw := NewResponseWriter(w)
 	rw.LogBody = logBody
 	f(rw, r)
+
+	if backend.optimistic {
+		// when running in optimistic mode the node will be taken out
+		// of the pool when it returns one of the following HTTP
+		// response status:
+		// - 502 Bad gateway (i.e. can't connect to remote)
+		// - 503 Service unavailable
+		// - 504 Gateway timeout
+		if rw.StatusCode == http.StatusBadGateway || rw.StatusCode == http.StatusServiceUnavailable || rw.StatusCode == http.StatusGatewayTimeout {
+			if backend.setOffline() {
+				go backend.healthCheck()
+			}
+		}
+	}
 
 	rq := traceRequestInfo{
 		Time:     time.Now().UTC(),
@@ -270,7 +284,7 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 
 	t.ReqInfo = rq
 	t.RespInfo = rs
-	t.NodeName = endpoint
+	t.NodeName = backend.endpoint
 	t.CallStats = traceCallStats{
 		Latency:         rs.Time.Sub(rw.StartTime),
 		Rx:              reqBodyRecorder.Size(),
@@ -286,7 +300,7 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 
 // Log only the headers.
 func httpTraceHdrs(f http.HandlerFunc, w http.ResponseWriter, r *http.Request, backend *Backend) {
-	trace := Trace(f, false, w, r, backend.endpoint)
+	trace := Trace(f, false, w, r, backend)
 	doTrace(trace, backend)
 }
 
