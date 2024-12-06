@@ -180,7 +180,7 @@ func (b *Backend) setOffline() bool {
 }
 
 func (b *Backend) setOnline() bool {
-	return atomic.SwapInt32(&b.up, offline) != online
+	return atomic.SwapInt32(&b.up, online) != online
 }
 
 // Online returns true if backend is up
