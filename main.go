@@ -157,6 +157,7 @@ func (l logMessage) String() string {
 
 // Backend entity to which requests gets load balanced.
 type Backend struct {
+	ctxt                context.Context
 	siteNumber          int
 	endpoint            string
 	proxy               *reverse.Proxy
@@ -165,6 +166,7 @@ type Backend struct {
 	healthCheckURL      string
 	healthCheckDuration time.Duration
 	healthCheckTimeout  time.Duration
+	healthOptimistic    bool
 	Stats               *BackendStats
 }
 
@@ -173,12 +175,12 @@ const (
 	online
 )
 
-func (b *Backend) setOffline() {
-	atomic.StoreInt32(&b.up, offline)
+func (b *Backend) setOffline() bool {
+	return atomic.SwapInt32(&b.up, offline) != offline
 }
 
-func (b *Backend) setOnline() {
-	atomic.StoreInt32(&b.up, online)
+func (b *Backend) setOnline() bool {
+	return atomic.SwapInt32(&b.up, online) != online
 }
 
 // Online returns true if backend is up
@@ -312,18 +314,19 @@ func getHealthCheckURL(endpoint, healthCheckPath string, healthCheckPort int) (s
 }
 
 // healthCheck - background routine which checks if a backend is up or down.
-func (b *Backend) healthCheck(ctxt context.Context) {
+func (b *Backend) healthCheck() {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	timer := time.NewTimer(b.healthCheckDuration)
 	defer timer.Stop()
 	for {
 		select {
-		case <-ctxt.Done():
+		case <-b.ctxt.Done():
 			return
 		case <-timer.C:
-			err := b.doHealthCheck()
-			if err != nil {
+			if err := b.doHealthCheck(); err != nil {
 				console.Errorln(err)
+			} else if b.healthOptimistic && b.Online() {
+				return
 			}
 			// Add random jitter to call
 			timer.Reset(b.healthCheckDuration + time.Duration(rng.Int63n(int64(b.healthCheckDuration))))
@@ -358,8 +361,7 @@ func (b *Backend) doHealthCheck() error {
 			logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
 		}
 		// observed an error, take the backend down.
-		b.setOffline()
-		if b.Stats.DowntimeStart.IsZero() {
+		if b.setOffline() {
 			b.Stats.DowntimeStart = time.Now().UTC()
 		}
 	} else {
@@ -438,6 +440,7 @@ type healthCheckOptions struct {
 	healthCheckPort     int
 	healthCheckDuration time.Duration
 	healthCheckTimeout  time.Duration
+	healthOptimistic    bool
 }
 
 func (m *multisite) renewSite(ctx *cli.Context, tlsMaxVersion uint16, opts healthCheckOptions) {
@@ -906,6 +909,8 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 			endpoints = append(endpoints, strings.Replace(target.String(), hostName, ip, 1))
 		}
 	}
+
+	healthOptimistic := ctx.GlobalBool("health-optimistic")
 	for _, endpoint := range endpoints {
 		endpoint = strings.TrimSuffix(endpoint, slashSeparator)
 		target, err := url.Parse(endpoint)
@@ -956,10 +961,10 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 		if err != nil {
 			console.Fatalln(err)
 		}
-		backend := &Backend{siteNum, endpoint, proxy, &http.Client{
+		backend := &Backend{ctxt, siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckURL, opts.healthCheckDuration, opts.healthCheckTimeout, &stats}
-		go backend.healthCheck(ctxt)
+		}, 0, healthCheckURL, opts.healthCheckDuration, opts.healthCheckTimeout, healthOptimistic, &stats}
+		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
 		connStats = append(connStats, newConnStats(endpoint))
@@ -993,6 +998,7 @@ func sidekickMain(ctx *cli.Context) {
 	})
 	log2.SetReportCaller(true)
 
+	healthOptimistic := ctx.GlobalBool("health-optimistic")
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthReadCheckPath := ctx.GlobalString("read-health-path")
 	healthCheckPort := ctx.GlobalInt("health-port")
@@ -1082,6 +1088,7 @@ func sidekickMain(ctx *cli.Context) {
 		healthCheckPort,
 		healthCheckDuration,
 		healthCheckTimeout,
+		healthOptimistic,
 	})
 	m.displayUI(!globalConsoleDisplay)
 
@@ -1179,6 +1186,7 @@ func sidekickMain(ctx *cli.Context) {
 				healthCheckPort,
 				healthCheckDuration,
 				healthCheckTimeout,
+				healthOptimistic,
 			})
 		default:
 			console.Infof("caught signal '%s'\n", signal)
@@ -1239,6 +1247,10 @@ func main() {
 		cli.BoolFlag{
 			Name:  "rr-dns-mode",
 			Usage: "enable round-robin DNS mode",
+		},
+		cli.BoolFlag{
+			Name:  "health-optimistic",
+			Usage: "only perform health requests when nodes are down",
 		},
 		cli.StringFlag{
 			Name:  "auto-tls-host",
