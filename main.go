@@ -166,7 +166,7 @@ type Backend struct {
 	healthCheckURL      string
 	healthCheckDuration time.Duration
 	healthCheckTimeout  time.Duration
-	optimistic          bool
+	healthOptimistic    bool
 	Stats               *BackendStats
 }
 
@@ -180,7 +180,7 @@ func (b *Backend) setOffline() bool {
 }
 
 func (b *Backend) setOnline() bool {
-	return atomic.SwapInt32(&b.up, offline) != online
+	return atomic.SwapInt32(&b.up, online) != online
 }
 
 // Online returns true if backend is up
@@ -325,7 +325,7 @@ func (b *Backend) healthCheck() {
 		case <-timer.C:
 			if err := b.doHealthCheck(); err != nil {
 				console.Errorln(err)
-			} else if b.optimistic && b.Online() {
+			} else if b.healthOptimistic && b.Online() {
 				return
 			}
 			// Add random jitter to call
@@ -440,7 +440,7 @@ type healthCheckOptions struct {
 	healthCheckPort     int
 	healthCheckDuration time.Duration
 	healthCheckTimeout  time.Duration
-	optimistic          bool
+	healthOptimistic    bool
 }
 
 func (m *multisite) renewSite(ctx *cli.Context, tlsMaxVersion uint16, opts healthCheckOptions) {
@@ -910,7 +910,7 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 		}
 	}
 
-	optimistic := ctx.GlobalBool("optimistic")
+	healthOptimistic := ctx.GlobalBool("health-optimistic")
 	for _, endpoint := range endpoints {
 		endpoint = strings.TrimSuffix(endpoint, slashSeparator)
 		target, err := url.Parse(endpoint)
@@ -963,7 +963,7 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 		}
 		backend := &Backend{ctxt, siteNum, endpoint, proxy, &http.Client{
 			Transport: proxy.Transport,
-		}, 0, healthCheckURL, opts.healthCheckDuration, opts.healthCheckTimeout, optimistic, &stats}
+		}, 0, healthCheckURL, opts.healthCheckDuration, opts.healthCheckTimeout, healthOptimistic, &stats}
 		go backend.healthCheck()
 		proxy.ErrorHandler = backend.ErrorHandler
 		backends = append(backends, backend)
@@ -998,7 +998,7 @@ func sidekickMain(ctx *cli.Context) {
 	})
 	log2.SetReportCaller(true)
 
-	optimistic := ctx.GlobalBool("optimistic")
+	healthOptimistic := ctx.GlobalBool("health-optimistic")
 	healthCheckPath := ctx.GlobalString("health-path")
 	healthReadCheckPath := ctx.GlobalString("read-health-path")
 	healthCheckPort := ctx.GlobalInt("health-port")
@@ -1088,7 +1088,7 @@ func sidekickMain(ctx *cli.Context) {
 		healthCheckPort,
 		healthCheckDuration,
 		healthCheckTimeout,
-		optimistic,
+		healthOptimistic,
 	})
 	m.displayUI(!globalConsoleDisplay)
 
@@ -1186,7 +1186,7 @@ func sidekickMain(ctx *cli.Context) {
 				healthCheckPort,
 				healthCheckDuration,
 				healthCheckTimeout,
-				optimistic,
+				healthOptimistic,
 			})
 		default:
 			console.Infof("caught signal '%s'\n", signal)
@@ -1249,7 +1249,7 @@ func main() {
 			Usage: "enable round-robin DNS mode",
 		},
 		cli.BoolFlag{
-			Name:  "optimistic",
+			Name:  "health-optimistic",
 			Usage: "only perform health requests when nodes are down",
 		},
 		cli.StringFlag{

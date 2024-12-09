@@ -248,7 +248,7 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 	rw.LogBody = logBody
 	f(rw, r)
 
-	if backend.optimistic {
+	if backend.healthOptimistic {
 		// when running in optimistic mode the node will be taken out
 		// of the pool when it returns one of the following HTTP
 		// response status:
