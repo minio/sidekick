@@ -228,7 +228,7 @@ func InternalTrace(req *http.Request, resp *http.Response, reqTime, respTime tim
 }
 
 // Trace gets trace of http request
-func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Request, endpoint string) TraceInfo {
+func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Request, backend *Backend) TraceInfo {
 	// Setup a http request body recorder
 	reqHeaders := r.Header.Clone()
 	reqHeaders.Set("Host", r.Host)
@@ -270,7 +270,7 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 
 	t.ReqInfo = rq
 	t.RespInfo = rs
-	t.NodeName = endpoint
+	t.NodeName = backend.endpoint
 	t.CallStats = traceCallStats{
 		Latency:         rs.Time.Sub(rw.StartTime),
 		Rx:              reqBodyRecorder.Size(),
@@ -286,7 +286,7 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 
 // Log only the headers.
 func httpTraceHdrs(f http.HandlerFunc, w http.ResponseWriter, r *http.Request, backend *Backend) {
-	trace := Trace(f, false, w, r, backend.endpoint)
+	trace := Trace(f, false, w, r, backend)
 	doTrace(trace, backend)
 }
 
