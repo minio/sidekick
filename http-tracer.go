@@ -248,20 +248,6 @@ func Trace(f http.HandlerFunc, logBody bool, w http.ResponseWriter, r *http.Requ
 	rw.LogBody = logBody
 	f(rw, r)
 
-	if backend.healthOptimistic {
-		// when running in optimistic mode the node will be taken out
-		// of the pool when it returns one of the following HTTP
-		// response status:
-		// - 502 Bad gateway (i.e. can't connect to remote)
-		// - 503 Service unavailable
-		// - 504 Gateway timeout
-		if rw.StatusCode == http.StatusBadGateway || rw.StatusCode == http.StatusServiceUnavailable || rw.StatusCode == http.StatusGatewayTimeout {
-			if backend.setOffline() {
-				go backend.healthCheck()
-			}
-		}
-	}
-
 	rq := traceRequestInfo{
 		Time:     time.Now().UTC(),
 		Method:   r.Method,
