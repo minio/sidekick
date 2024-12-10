@@ -175,12 +175,39 @@ const (
 	online
 )
 
-func (b *Backend) setOffline() bool {
-	return atomic.SwapInt32(&b.up, offline) != offline
+func (b *Backend) setOffline() (swapped bool) {
+	if atomic.SwapInt32(&b.up, offline) == offline {
+		return false
+	}
+
+	now := time.Now().UTC()
+
+	b.Stats.Lock()
+	defer b.Stats.Unlock()
+
+	b.Stats.DowntimeStart = now
+	b.Stats.UpSince = time.Time{}
+	return true
 }
 
-func (b *Backend) setOnline() bool {
-	return atomic.SwapInt32(&b.up, online) != online
+func (b *Backend) setOnline() (swapped bool) {
+	if atomic.SwapInt32(&b.up, online) == online {
+		return false
+	}
+	now := time.Now().UTC()
+
+	b.Stats.Lock()
+	defer b.Stats.Unlock()
+
+	b.Stats.UpSince = now
+	if !b.Stats.DowntimeStart.IsZero() {
+		downtime := now.Sub(b.Stats.DowntimeStart)
+		b.Stats.LastDowntime = downtime
+		b.Stats.CumDowntime += downtime
+	}
+	b.Stats.DowntimeStart = time.Time{}
+
+	return true
 }
 
 // Online returns true if backend is up
@@ -356,31 +383,22 @@ func (b *Backend) doHealthCheck() error {
 	resp, err := b.httpClient.Do(req)
 	respTime := time.Now().UTC()
 	drainBody(resp)
-	if err != nil || (err == nil && resp.StatusCode != http.StatusOK) {
-		if globalLoggingEnabled && (!b.Online() || b.Stats.UpSince.IsZero()) {
-			logMsg(logMessage{Endpoint: b.endpoint, Status: "down", Error: err})
-		}
-		// observed an error, take the backend down.
-		if b.setOffline() {
-			b.Stats.DowntimeStart = time.Now().UTC()
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if b.setOffline() && globalLoggingEnabled {
+			logMsg(logMessage{
+				Endpoint: b.endpoint,
+				Status:   "down",
+				Error:    err,
+			})
 		}
 	} else {
-		var downtimeEnd time.Time
-		if !b.Stats.DowntimeStart.IsZero() {
-			now := time.Now().UTC()
-			b.updateDowntime(now.Sub(b.Stats.DowntimeStart))
-			downtimeEnd = now
-		}
-		if globalLoggingEnabled && !b.Online() && !b.Stats.UpSince.IsZero() {
+		if b.setOnline() && globalLoggingEnabled {
 			logMsg(logMessage{
 				Endpoint:         b.endpoint,
 				Status:           "up",
-				DowntimeDuration: downtimeEnd.Sub(b.Stats.DowntimeStart),
+				DowntimeDuration: b.Stats.LastDowntime,
 			})
 		}
-		b.Stats.UpSince = time.Now().UTC()
-		b.Stats.DowntimeStart = time.Time{}
-		b.setOnline()
 	}
 	if globalTrace != "application" {
 		if resp != nil {
@@ -389,13 +407,6 @@ func (b *Backend) doHealthCheck() error {
 	}
 
 	return nil
-}
-
-func (b *Backend) updateDowntime(downtime time.Duration) {
-	b.Stats.Lock()
-	defer b.Stats.Unlock()
-	b.Stats.LastDowntime = downtime
-	b.Stats.CumDowntime += downtime
 }
 
 // updateCallStats updates the cumulative stats for each call to backend
