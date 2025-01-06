@@ -47,6 +47,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
+	"go.uber.org/automaxprocs/maxprocs"
 	"golang.org/x/term"
 
 	"github.com/minio/cli"
@@ -537,8 +538,7 @@ func (m *multisite) populate() {
 			cumDowntime := b.Stats.CumDowntime
 			lastDowntime := b.Stats.LastDowntime
 			if !b.Online() {
-				// show current downtime and cumulative downtime including
-				// the current downtime
+				// show current downtime and cumulative downtime including the current downtime
 				lastDowntime = time.Now().UTC().Sub(b.Stats.DowntimeStart)
 				cumDowntime += lastDowntime
 			}
@@ -999,7 +999,12 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 			Transport:      transport,
 			ModifyResponse: modifyResponse(),
 		}
-		stats := BackendStats{MinLatency: 24 * time.Hour, MaxLatency: 0}
+		stats := BackendStats{
+			MinLatency:    24 * time.Hour,
+			MaxLatency:    0,
+			DowntimeStart: time.Now().UTC(),
+			UpSince:       time.Time{},
+		}
 		healthCheckURL, err := getHealthCheckURL(endpoint, opts.healthCheckPath, opts.healthCheckPort)
 		if err != nil {
 			console.Fatalln(err)
@@ -1032,6 +1037,10 @@ var headers = []string{
 
 func sidekickMain(ctx *cli.Context) {
 	checkMain(ctx)
+
+	// Override GOMAXPROCS with container settings, if not specified.
+	maxprocs.Set(maxprocs.Logger(func(_ string, i ...any) {
+	}))
 
 	log2.SetFormatter(&logrus.TextFormatter{
 		DisableColors: true,
