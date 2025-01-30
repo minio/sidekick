@@ -1039,7 +1039,7 @@ func sidekickMain(ctx *cli.Context) {
 	checkMain(ctx)
 
 	// Override GOMAXPROCS with container settings, if not specified.
-	maxprocs.Set(maxprocs.Logger(func(_ string, i ...any) {
+	maxprocs.Set(maxprocs.Logger(func(_ string, _ ...any) {
 	}))
 
 	log2.SetFormatter(&logrus.TextFormatter{
