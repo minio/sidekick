@@ -133,33 +133,33 @@ func generateTLSCertKey(host string) ([]byte, []byte, error) {
 func LoadX509KeyPair(certFile, keyFile string) (tls.Certificate, error) {
 	certPEMBlock, err := os.ReadFile(certFile)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("Unable to read the public key: %w", err)
+		return tls.Certificate{}, fmt.Errorf("unable to read the public key: %w", err)
 	}
 	keyPEMBlock, err := os.ReadFile(keyFile)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("Unable to read the private key: %w", err)
+		return tls.Certificate{}, fmt.Errorf("unable to read the private key: %w", err)
 	}
 	key, rest := pem.Decode(keyPEMBlock)
 	if len(rest) > 0 {
-		return tls.Certificate{}, errors.New("The private key contains additional data")
+		return tls.Certificate{}, errors.New("the private key contains additional data")
 	}
 	if key == nil {
-		return tls.Certificate{}, errors.New("The private key is not readable")
+		return tls.Certificate{}, errors.New("the private key is not readable")
 	}
 	if x509.IsEncryptedPEMBlock(key) {
 		password := globalKeyPassword
 		if len(password) == 0 {
-			return tls.Certificate{}, errors.New("The private key is encrypted, please set the flag --key-password")
+			return tls.Certificate{}, errors.New("the private key is encrypted, please set the flag --key-password")
 		}
 		decryptedKey, decErr := x509.DecryptPEMBlock(key, []byte(password))
 		if decErr != nil {
-			return tls.Certificate{}, fmt.Errorf("Unable to decrypt private key: %w", decErr)
+			return tls.Certificate{}, fmt.Errorf("unable to decrypt private key: %w", decErr)
 		}
 		keyPEMBlock = pem.EncodeToMemory(&pem.Block{Type: key.Type, Bytes: decryptedKey})
 	}
 	cert, err := tls.X509KeyPair(certPEMBlock, keyPEMBlock)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("Unable to load certs: %w", err)
+		return tls.Certificate{}, fmt.Errorf("unable to load certs: %w", err)
 	}
 	return cert, nil
 }
