@@ -128,6 +128,8 @@ func generateTLSCertKey(host string) ([]byte, []byte, error) {
 // LoadX509KeyPair - load an X509 key pair (private key , certificate)
 // from the provided paths. The private key may be encrypted and is
 // decrypted using the flags: --key-password.
+//
+//nolint:staticcheck
 func LoadX509KeyPair(certFile, keyFile string) (tls.Certificate, error) {
 	certPEMBlock, err := os.ReadFile(certFile)
 	if err != nil {
