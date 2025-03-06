@@ -82,6 +82,7 @@ var (
 	log2                 *logrus.Logger
 	globalHostBalance    string
 	globalTLSCert        atomic.Pointer[[]byte]
+	globalKeyPassword    string
 )
 
 const (
@@ -1073,6 +1074,7 @@ func sidekickMain(ctx *cli.Context) {
 	if globalHostBalance == "" {
 		globalHostBalance = "least"
 	}
+	globalKeyPassword = ctx.GlobalString("key-password")
 
 	tlsMaxVersion := uint16(tls.VersionTLS13)
 	switch tlsMax := ctx.GlobalString("tls-max"); tlsMax {
@@ -1149,7 +1151,7 @@ func sidekickMain(ctx *cli.Context) {
 		ErrorLog: log.New(io.Discard, "", 0), // Turn-off random logging by Go stdlib. From MinIO server implementation.
 	}
 	if ctx.String("cert") != "" && ctx.String("key") != "" {
-		manager, err := certs.NewManager(context.Background(), ctx.String("cert"), ctx.String("key"), tls.LoadX509KeyPair)
+		manager, err := certs.NewManager(context.Background(), ctx.String("cert"), ctx.String("key"), LoadX509KeyPair)
 		if err != nil {
 			console.Fatalln(err)
 		}
@@ -1346,6 +1348,10 @@ func main() {
 		cli.StringFlag{
 			Name:  "key",
 			Usage: "server private key file",
+		},
+		cli.StringFlag{
+			Name:  "key-password",
+			Usage: "server private key password",
 		},
 		cli.StringFlag{
 			Name:  "pprof",

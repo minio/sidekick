@@ -21,9 +21,11 @@ import (
 	"crypto/elliptic"
 	crand "crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -121,4 +123,43 @@ func generateTLSCertKey(host string) ([]byte, []byte, error) {
 	pem.Encode(keyOut, pemBlockForKey(priv))
 
 	return certOut.Bytes(), keyOut.Bytes(), nil
+}
+
+// LoadX509KeyPair - load an X509 key pair (private key , certificate)
+// from the provided paths. The private key may be encrypted and is
+// decrypted using the flags: --key-password.
+//
+//nolint:staticcheck
+func LoadX509KeyPair(certFile, keyFile string) (tls.Certificate, error) {
+	certPEMBlock, err := os.ReadFile(certFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("unable to read the public key: %w", err)
+	}
+	keyPEMBlock, err := os.ReadFile(keyFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("unable to read the private key: %w", err)
+	}
+	key, rest := pem.Decode(keyPEMBlock)
+	if len(rest) > 0 {
+		return tls.Certificate{}, errors.New("the private key contains additional data")
+	}
+	if key == nil {
+		return tls.Certificate{}, errors.New("the private key is not readable")
+	}
+	if x509.IsEncryptedPEMBlock(key) {
+		password := globalKeyPassword
+		if len(password) == 0 {
+			return tls.Certificate{}, errors.New("the private key is encrypted, please set the flag --key-password")
+		}
+		decryptedKey, decErr := x509.DecryptPEMBlock(key, []byte(password))
+		if decErr != nil {
+			return tls.Certificate{}, fmt.Errorf("unable to decrypt private key: %w", decErr)
+		}
+		keyPEMBlock = pem.EncodeToMemory(&pem.Block{Type: key.Type, Bytes: decryptedKey})
+	}
+	cert, err := tls.X509KeyPair(certPEMBlock, keyPEMBlock)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("unable to load certs: %w", err)
+	}
+	return cert, nil
 }
