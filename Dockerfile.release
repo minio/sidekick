@@ -1,5 +1,11 @@
+FROM alpine:latest as certs
+RUN apk --update add ca-certificates
+
 FROM scratch
 MAINTAINER MinIO Development "dev@min.io"
 EXPOSE 8080
-COPY sidekick /sidekick
-ENTRYPOINT ["/sidekick"]
+
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY sidekick /bin/sidekick
+
+ENTRYPOINT ["/bin/sidekick"]

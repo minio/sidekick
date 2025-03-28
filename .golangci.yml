@@ -33,4 +33,4 @@ issues:
       - http.CloseNotifier has been deprecated since
       - has been deprecated since Go 1.6
 service:
-  golangci-lint-version: 1.45.2 # use the fixed version to not introduce new linters unexpectedly
+  golangci-lint-version: 1.64.8 # use the fixed version to not introduce new linters unexpectedly
