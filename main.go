@@ -910,7 +910,7 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 		for i, arg := range siteStrs {
 			patterns, err := ellipses.FindEllipsesPatterns(arg)
 			if err != nil {
-				console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", arg, err))
+				console.Fatalln(fmt.Errorf("unable to parse input arg %s: %s", arg, err))
 			}
 			argPatterns[i] = patterns
 		}
@@ -933,12 +933,12 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 		// guess it is LB config address
 		target, err := url.Parse(endpoints[0])
 		if err != nil {
-			console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", endpoints[0], err))
+			console.Fatalln(fmt.Errorf("unable to parse input arg %s: %s", endpoints[0], err))
 		}
 		hostName = target.Hostname()
 		ips, err := net.LookupHost(hostName)
 		if err != nil {
-			console.Fatalln(fmt.Errorf("Unable to lookup host %s", hostName))
+			console.Fatalln(fmt.Errorf("unable to lookup host %s", hostName))
 		}
 		// set the new endpoints
 		endpoints = []string{}
@@ -959,24 +959,24 @@ func configureSite(ctxt context.Context, ctx *cli.Context, siteNum int, siteStrs
 		endpoint = strings.TrimSuffix(endpoint, slashSeparator)
 		target, err := url.Parse(endpoint)
 		if err != nil {
-			console.Fatalln(fmt.Errorf("Unable to parse input arg %s: %s", endpoint, err))
+			console.Fatalln(fmt.Errorf("unable to parse input arg %s: %s", endpoint, err))
 		}
 		if target.Scheme == "" {
 			target.Scheme = "http"
 		}
 		if target.Scheme != "http" && target.Scheme != "https" {
-			console.Fatalln("Unexpected scheme %s, should be http or https, please use '%s --help'",
+			console.Fatalln("unexpected scheme %s, should be http or https, please use '%s --help'",
 				endpoint, ctx.App.Name)
 		}
 		if target.Host == "" {
-			console.Fatalln(fmt.Errorf("Missing host address %s, please use '%s --help'",
+			console.Fatalln(fmt.Errorf("missing host address %s, please use '%s --help'",
 				endpoint, ctx.App.Name))
 		}
 		if prevScheme == "" {
 			prevScheme = target.Scheme
 		}
 		if prevScheme != target.Scheme {
-			console.Fatalln(fmt.Errorf("Unexpected scheme %s, please use 'http' or 'http's for all backend endpoints '%s --help'",
+			console.Fatalln(fmt.Errorf("unexpected scheme %s, please use 'http' or 'http's for all backend endpoints '%s --help'",
 				endpoint, ctx.App.Name))
 		}
 		if transport == nil {
