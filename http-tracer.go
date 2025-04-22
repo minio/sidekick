@@ -151,7 +151,7 @@ func (lrw *ResponseWriter) Body() []byte {
 func (lrw *ResponseWriter) WriteHeader(code int) {
 	lrw.StatusCode = code
 	if !lrw.headersLogged {
-		lrw.writeHeaders(&lrw.headers, code, lrw.ResponseWriter.Header())
+		lrw.writeHeaders(&lrw.headers, code, lrw.Header())
 		lrw.headersLogged = true
 	}
 	lrw.ResponseWriter.WriteHeader(code)
