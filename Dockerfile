@@ -1,4 +1,4 @@
-FROM golang:1.18
+FROM golang:1.24
 
 ADD go.mod /go/src/github.com/minio/sidekick/go.mod
 ADD go.sum /go/src/github.com/minio/sidekick/go.sum
@@ -18,5 +18,7 @@ MAINTAINER MinIO Development "dev@min.io"
 EXPOSE 8080
 
 COPY --from=0 /go/src/github.com/minio/sidekick/sidekick /sidekick
+COPY --from=0 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
 
 ENTRYPOINT ["/sidekick"]
