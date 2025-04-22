@@ -41,7 +41,7 @@ import (
 func generateTLSCertKey(host string) ([]byte, []byte, error) {
 	validFor := 365 * 24 * time.Hour
 	if len(host) == 0 {
-		return nil, nil, fmt.Errorf("Missing host parameter")
+		return nil, nil, fmt.Errorf("missing host parameter")
 	}
 
 	publicKey := func(priv interface{}) interface{} {
@@ -113,7 +113,7 @@ func generateTLSCertKey(host string) ([]byte, []byte, error) {
 
 	derBytes, err := x509.CreateCertificate(crand.Reader, &template, &template, publicKey(priv), priv)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to create certificate: %w", err)
+		return nil, nil, fmt.Errorf("failed to create certificate: %w", err)
 	}
 
 	certOut := bytes.NewBuffer([]byte{})

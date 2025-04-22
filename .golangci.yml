@@ -1,36 +1,43 @@
-linters-settings:
-  golint:
-    min-confidence: 0
-
-  misspell:
-    locale: US
-
+version: "2"
 linters:
-  disable-all: true
+  default: none
   enable:
-    - typecheck
-    - goimports
-    - misspell
-    - govet
-    - revive
-    - ineffassign
-    - gosimple
-    - gomodguard
-    - gofmt
-    - unused
-    - unconvert
-    - gocritic
-    - gofumpt
-    - tenv
     - durationcheck
+    - gocritic
+    - gomodguard
+    - govet
+    - ineffassign
+    - misspell
+    - revive
     - staticcheck
-
-issues:
-  exclude-use-default: false
-  exclude:
-      - should have a package comment
-      - error strings should not be capitalized or end with punctuation or a newline
-      - http.CloseNotifier has been deprecated since
-      - has been deprecated since Go 1.6
-service:
-  golangci-lint-version: 1.45.2 # use the fixed version to not introduce new linters unexpectedly
+    - unconvert
+    - unused
+  settings:
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    rules:
+      - path: (.+)\.go$
+        text: should have a package comment
+      - path: (.+)\.go$
+        text: error strings should not be capitalized or end with punctuation or a newline
+      - path: (.+)\.go$
+        text: http.CloseNotifier has been deprecated since
+      - path: (.+)\.go$
+        text: has been deprecated since Go 1.6
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
