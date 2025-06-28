@@ -67,8 +67,10 @@ func (r *recordRequest) Read(p []byte) (n int, err error) {
 
 func (r *recordRequest) Size() int {
 	sz := r.bytesRead
-	for k, v := range r.headers {
-		sz += len(k) + len(v)
+	for k, vals := range r.headers {
+		for _, v := range vals {
+			sz += len(k) + len(v)
+		}
 	}
 	return sz
 }
@@ -92,7 +94,7 @@ type ResponseWriter struct {
 }
 
 // NewResponseWriter - returns a wrapped response writer to trap
-// http status codes for auditiing purposes.
+// HTTP status codes for auditing purposes.
 func NewResponseWriter(w http.ResponseWriter) *ResponseWriter {
 	return &ResponseWriter{
 		ResponseWriter: w,
@@ -162,7 +164,7 @@ func (lrw *ResponseWriter) Flush() {
 	lrw.ResponseWriter.(http.Flusher).Flush()
 }
 
-// Size - reutrns the number of bytes written
+// Size - returns the number of bytes written
 func (lrw *ResponseWriter) Size() int {
 	return lrw.bytesWritten
 }

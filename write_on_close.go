@@ -50,7 +50,7 @@ func (w *WriteOnCloser) Close() error {
 // HasWritten returns true if at least one write operation was performed.
 func (w *WriteOnCloser) HasWritten() bool { return w.hasWritten }
 
-// WriteOnClose takes an io.Writer and returns an ioutil.WriteOnCloser.
+// WriteOnClose takes an io.Writer and returns a WriteOnCloser.
 func WriteOnClose(w io.Writer) *WriteOnCloser {
 	return &WriteOnCloser{w, false}
 }
