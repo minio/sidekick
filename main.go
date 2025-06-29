@@ -83,6 +83,7 @@ var (
 	globalHostBalance    string
 	globalTLSCert        atomic.Pointer[[]byte]
 	globalKeyPassword    string
+	globalExitCode       int
 )
 
 const (
@@ -1075,6 +1076,7 @@ func sidekickMain(ctx *cli.Context) {
 		globalHostBalance = "least"
 	}
 	globalKeyPassword = ctx.GlobalString("key-password")
+	globalExitCode = ctx.GlobalInt("exit-code")
 
 	tlsMaxVersion := uint16(tls.VersionTLS13)
 	switch tlsMax := ctx.GlobalString("tls-max"); tlsMax {
@@ -1242,7 +1244,7 @@ func sidekickMain(ctx *cli.Context) {
 			})
 		default:
 			console.Infof("caught signal '%s'\n", signal)
-			os.Exit(1)
+			os.Exit(globalExitCode)
 		}
 	}
 }
@@ -1380,6 +1382,11 @@ func main() {
 			Usage:  "specify maximum supported TLS version",
 			Value:  "1.3",
 			Hidden: true,
+		},
+		cli.IntFlag{
+			Name:  "exit-code",
+			Usage: "exit code to use when program terminates by a signal",
+			Value: 1,
 		},
 	}
 	app.CustomAppHelpTemplate = `NAME:
