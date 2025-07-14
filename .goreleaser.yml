@@ -11,7 +11,7 @@ release:
 
 before:
   hooks:
-    - go mod tidy -compat=1.21
+    - go mod tidy -compat=1.24
 
 builds:
   -
@@ -59,9 +59,6 @@ signs:
       - '-c'
       - 'minisign -s /media/${USER}/minio/minisign.key -Sm ${artifact} < /media/${USER}/minio/minisign-passphrase'
     artifacts: all
-
-snapshot:
-  name_template: v0.0.0@{{.ShortCommit}}
 
 changelog:
   sort: asc
